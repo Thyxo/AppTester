@@ -11,7 +11,7 @@ WebView2 på Windows, WebKit på macOS/Linux. Ingen Electron.
 |---|---|---|
 | a | App-vindue med egen data-mappe, eksterne links i browser | ✅ |
 | b | App-liste i `apps.json` + launcher-vindue | ✅ |
-| c | Manifest-ikoner/farver, søg, sortering, favoritter, husk vinduesstørrelse | ⏳ |
+| c | Manifest-ikoner/farver, søg, sortering, favoritter, husk vinduesstørrelse | ✅ |
 | d | Testmenu: DevTools, viewports, hard reload, ryd data, SW-/offline-status | ⏳ |
 
 ## Kom i gang
@@ -53,13 +53,24 @@ du tilføjer selv dem, du vil have:
 - Fejl i filen (dublet-id, forkert URL, stavefejl i et felt) vises i launcheren,
   og `cargo test` fanger dem også.
 
+## Launcheren
+
+- **Ikoner og farver** hentes fra appens web manifest (`<link rel="manifest">`,
+  ellers `/manifest.webmanifest` / `/manifest.json`). Mangler det, bruges
+  apple-touch-icon, `<link rel="icon">` eller `/favicon.ico`, og ellers et farvet bogstav.
+  Alt caches lokalt, så griddet ser ens ud offline. **↻ Opdater** henter igen.
+- **Søg**: `/` eller `Ctrl+F` fokuserer søgefeltet, `Enter` åbner første app, `Esc` rydder.
+- **Sortering**: navn eller senest åbnet. **☆** gør en app til favorit (vises øverst).
+- **App-vinduer** husker størrelse og placering pr. app. Baggrundsfarven kommer fra
+  manifestets `background_color`, og lyst/mørkt tema fra `theme_color`.
+
 ## Arkitektur
 
 ```
 Launcher-vindue (ui/, vanilla JS)
         │ invoke()
 Rust-kerne (src-tauri/src)
-  apps.json · appwin
+  apps · manifest · store · appwin
         │ WebviewWindowBuilder
 App-vinduer (ét pr. app)
   egen data-mappe · testmenu · status i titel
@@ -83,7 +94,7 @@ AppTester/
 ├─ ui/                           launcher-frontend (ingen build-step)
 │  ├─ index.html
 │  ├─ styles.css
-│  └─ main.js                    grid, åbn app
+│  └─ main.js                    grid, søg, sortering, favoritter
 └─ src-tauri/
    ├─ Cargo.toml
    ├─ tauri.conf.json
@@ -93,14 +104,17 @@ AppTester/
       ├─ main.rs
       ├─ lib.rs                  opstart, kommandoer
       ├─ apps.rs                 indlæs + valider apps.json
+      ├─ manifest.rs             manifest, ikonvalg, cache
+      ├─ store.rs                favoritter, senest åbnet, vinduesplacering
       └─ appwin/mod.rs           app-vinduer, data-mappe, link-politik
 ```
 
-Planlagt: `manifest.rs`, `store.rs` (favoritter, vinduesstørrelser),
-`appwin/{menu,viewport,status}.rs`.
+Planlagt (trin d): `appwin/{menu,viewport,status}.rs`.
 
 ## Hvor ligger data?
 
 | Hvad | Windows | macOS |
 |---|---|---|
 | Web-data pr. app | `%APPDATA%\dk.thyxo.pwalauncher\webdata\<app-id>\` | WebKit data store pr. app |
+| Favoritter, vinduer | `%APPDATA%\dk.thyxo.pwalauncher\state.json` | `~/Library/Application Support/dk.thyxo.pwalauncher/state.json` |
+| Ikon-cache | `%LOCALAPPDATA%\dk.thyxo.pwalauncher\meta\` | `~/Library/Caches/dk.thyxo.pwalauncher/meta/` |

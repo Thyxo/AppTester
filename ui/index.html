@@ -9,11 +9,28 @@
 <body>
   <header>
     <h1>PWA Launcher</h1>
+    <div class="toolbar">
+      <input id="search" type="search" placeholder="Søg…  ( / )" autocomplete="off" aria-label="Søg i apps">
+      <select id="sort" aria-label="Sortering">
+        <option value="name">Navn</option>
+        <option value="recent">Senest åbnet</option>
+      </select>
+      <button id="refresh" type="button" title="Hent ikoner og farver igen">↻ Opdater</button>
+    </div>
   </header>
   <main>
-    <p id="error" class="error" role="alert" hidden></p>
-    <ul id="grid" class="grid" aria-label="Apps"></ul>
-    <p id="empty" class="empty" hidden>Ingen apps endnu – tilføj dem i <code>apps.json</code>.</p>
+    <p id="error" class="notice error" role="alert" hidden></p>
+    <p id="offline" class="notice" hidden>Offline – viser gemte ikoner.</p>
+    <section id="fav-section" hidden>
+      <h2>Favoritter</h2>
+      <ul id="fav-grid" class="grid"></ul>
+    </section>
+    <section>
+      <h2 id="all-title">Apps</h2>
+      <ul id="grid" class="grid"></ul>
+    </section>
+    <p id="empty" class="muted" hidden>Ingen apps endnu – tilføj dem i <code>apps.json</code>.</p>
+    <p id="nomatch" class="muted" hidden>Ingen apps matcher søgningen.</p>
   </main>
   <script src="main.js"></script>
 </body>

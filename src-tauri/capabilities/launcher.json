@@ -2,6 +2,14 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "launcher",
   "description": "Rettigheder for launcher-vinduet (lokalt indhold). App-vinduer med eksterne URL'er får ingen.",
-  "windows": ["launcher"],
-  "permissions": ["core:default", "allow-list-apps", "allow-open-app"]
+  "windows": [
+    "launcher"
+  ],
+  "permissions": [
+    "core:default",
+    "allow-list-apps",
+    "allow-refresh-meta",
+    "allow-toggle-favorite",
+    "allow-open-app"
+  ]
 }

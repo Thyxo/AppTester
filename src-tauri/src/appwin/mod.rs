@@ -4,14 +4,26 @@ use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use tauri::webview::{NewWindowResponse, PageLoadEvent};
-use tauri::{AppHandle, Manager, Runtime, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::webview::{Color, NewWindowResponse, PageLoadEvent};
+use tauri::{
+    AppHandle, Manager, Runtime, Theme, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+    WindowEvent,
+};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::apps::AppEntry;
+use crate::manifest::{self, Meta};
+use crate::store::{Store, WindowGeom};
+
+/// Standardstørrelse: en telefon på højkant.
+const DEFAULT_SIZE: (f64, f64) = (430.0, 900.0);
 
 /// Åbner appen i sit eget vindue, eller fokuserer det, hvis det allerede er åbent.
-pub fn open<R: Runtime>(app: &AppHandle<R>, spec: &AppEntry) -> tauri::Result<WebviewWindow<R>> {
+pub fn open<R: Runtime>(
+    app: &AppHandle<R>,
+    spec: &AppEntry,
+    meta: Option<&Meta>,
+) -> tauri::Result<WebviewWindow<R>> {
     let label = format!("app-{}", spec.id);
     if let Some(win) = app.get_webview_window(&label) {
         win.unminimize()?;
@@ -24,8 +36,7 @@ pub fn open<R: Runtime>(app: &AppHandle<R>, spec: &AppEntry) -> tauri::Result<We
     let mut builder =
         WebviewWindowBuilder::new(app, &label, WebviewUrl::External(spec.url.clone()))
             .title(&spec.name)
-            .inner_size(430.0, 900.0)
-            .min_inner_size(320.0, 480.0)
+            .min_inner_size(240.0, 320.0)
             .on_navigation({
                 let nav = nav.clone();
                 let app = app.clone();
@@ -75,7 +86,84 @@ pub fn open<R: Runtime>(app: &AppHandle<R>, spec: &AppEntry) -> tauri::Result<We
         builder = builder.data_store_identifier(store_identifier(&spec.id));
     }
 
-    builder.build()
+    // Husket placering, hvis den stadig er på en tilsluttet skærm.
+    let saved = app
+        .state::<Store>()
+        .read(|s| s.windows.get(&spec.id).copied())
+        .filter(|g| on_some_monitor(app, g));
+    builder = match saved {
+        Some(g) => builder.position(g.x, g.y).inner_size(g.width, g.height),
+        None => builder.inner_size(DEFAULT_SIZE.0, DEFAULT_SIZE.1).center(),
+    };
+
+    // Farver fra manifestet: baggrund mens siden indlæses, lyst/mørkt tema til titellinjen.
+    if let Some(meta) = meta {
+        if let Some((r, g, b)) = meta
+            .background_color
+            .as_deref()
+            .and_then(manifest::parse_hex_color)
+        {
+            builder = builder.background_color(Color(r, g, b, 255));
+        }
+        if let Some(rgb) = meta
+            .theme_color
+            .as_deref()
+            .and_then(manifest::parse_hex_color)
+        {
+            let theme = if manifest::is_dark(rgb) {
+                Theme::Dark
+            } else {
+                Theme::Light
+            };
+            builder = builder.theme(Some(theme));
+        }
+    }
+
+    let win = builder.build()?;
+
+    let id = spec.id.clone();
+    let handle = win.clone();
+    win.on_window_event(move |event| {
+        if let WindowEvent::CloseRequested { .. } = event {
+            if let Some(geom) = current_geom(&handle) {
+                handle
+                    .state::<Store>()
+                    .update(|s| s.windows.insert(id.clone(), geom));
+            }
+        }
+    });
+
+    Ok(win)
+}
+
+/// Vinduets placering i logiske pixels – ikke når det er minimeret/maksimeret.
+fn current_geom<R: Runtime>(win: &WebviewWindow<R>) -> Option<WindowGeom> {
+    if win.is_minimized().ok()? || win.is_maximized().ok()? {
+        return None;
+    }
+    let scale = win.scale_factor().ok()?;
+    let pos = win.outer_position().ok()?.to_logical::<f64>(scale);
+    let size = win.inner_size().ok()?.to_logical::<f64>(scale);
+    Some(WindowGeom {
+        x: pos.x,
+        y: pos.y,
+        width: size.width,
+        height: size.height,
+    })
+}
+
+fn on_some_monitor<R: Runtime>(app: &AppHandle<R>, g: &WindowGeom) -> bool {
+    let Ok(monitors) = app.available_monitors() else {
+        return true;
+    };
+    // Titellinjens venstre del skal kunne gribes.
+    let (px, py) = (g.x + 40.0, g.y + 10.0);
+    monitors.iter().any(|m| {
+        let scale = m.scale_factor();
+        let pos = m.position().to_logical::<f64>(scale);
+        let size = m.size().to_logical::<f64>(scale);
+        px >= pos.x && px < pos.x + size.width && py >= pos.y && py < pos.y + size.height
+    })
 }
 
 /// Hvilke navigationer der bliver i app-vinduet.

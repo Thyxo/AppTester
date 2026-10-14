@@ -1,12 +1,16 @@
-//! App-listen. Redigeres i `apps.json` i repo-roden og bygges ind i programmet.
+//! App-listen i `apps.json` i brugerens config-mappe.
+//!
+//! Første gang oprettes filen med standardlisten fra repo-roden. Derefter læses
+//! den frisk ved hver brug, så ændringer slår igennem uden genstart eller ny build.
 
 use std::collections::HashSet;
-use std::sync::OnceLock;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use tauri::Url;
 
-const APPS_JSON: &str = include_str!("../../apps.json");
+/// Standardlisten, som kopieres ud første gang.
+const DEFAULT_APPS_JSON: &str = include_str!("../../apps.json");
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -22,22 +26,48 @@ pub struct AppEntry {
     pub preview: Option<Url>,
 }
 
-/// Alle apps fra `apps.json`, eller en læsbar fejl hvis filen er ugyldig.
-pub fn all() -> Result<&'static [AppEntry], String> {
-    static APPS: OnceLock<Result<Vec<AppEntry>, String>> = OnceLock::new();
-    APPS.get_or_init(|| parse(APPS_JSON))
-        .as_deref()
-        .map_err(Clone::clone)
+pub struct AppsFile {
+    path: PathBuf,
 }
 
-pub fn find(id: &str) -> Result<&'static AppEntry, String> {
-    all()?
-        .iter()
-        .find(|a| a.id == id)
-        .ok_or_else(|| format!("Ukendt app: {id}"))
+impl AppsFile {
+    pub fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Opretter filen med standardlisten, hvis den ikke findes.
+    pub fn ensure_exists(&self) -> std::io::Result<()> {
+        if self.path.exists() {
+            return Ok(());
+        }
+        if let Some(dir) = self.path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        std::fs::write(&self.path, DEFAULT_APPS_JSON)
+    }
+
+    /// Alle apps, eller en læsbar fejl hvis filen mangler eller er ugyldig.
+    pub fn load(&self) -> Result<Vec<AppEntry>, String> {
+        let json = std::fs::read_to_string(&self.path)
+            .map_err(|e| format!("Kan ikke læse {}: {e}", self.path.display()))?;
+        parse(&json).map_err(|e| format!("{e}\n({})", self.path.display()))
+    }
+
+    pub fn find(&self, id: &str) -> Result<AppEntry, String> {
+        self.load()?
+            .into_iter()
+            .find(|a| a.id == id)
+            .ok_or_else(|| format!("Ukendt app: {id} – er den fjernet fra apps.json?"))
+    }
 }
 
 fn parse(json: &str) -> Result<Vec<AppEntry>, String> {
+    // Notesblok gemmer gerne med BOM.
+    let json = json.trim_start_matches('\u{feff}');
     let apps: Vec<AppEntry> =
         serde_json::from_str(json).map_err(|e| format!("apps.json kan ikke læses: {e}"))?;
 
@@ -77,8 +107,36 @@ mod tests {
 
     #[test]
     fn bundled_apps_json_is_valid() {
-        let apps = parse(APPS_JSON).expect("apps.json skal være gyldig");
+        let apps = parse(DEFAULT_APPS_JSON).expect("apps.json skal være gyldig");
         assert!(!apps.is_empty());
+    }
+
+    #[test]
+    fn file_is_created_and_reread() {
+        let dir = std::env::temp_dir().join(format!("pwa-launcher-apps-{}", std::process::id()));
+        let file = AppsFile::new(dir.join("apps.json"));
+        file.ensure_exists().unwrap();
+        assert_eq!(
+            file.load().unwrap().len(),
+            parse(DEFAULT_APPS_JSON).unwrap().len()
+        );
+
+        // Ændringer slår igennem med det samme – også med BOM fra Notesblok.
+        std::fs::write(
+            file.path(),
+            "\u{feff}[{\"id\":\"ny\",\"name\":\"Ny\",\"url\":\"https://ny.dk\"}]",
+        )
+        .unwrap();
+        assert_eq!(file.find("ny").unwrap().name, "Ny");
+        assert!(file.find("stopwatchplus").is_err());
+
+        // ensure_exists overskriver ikke brugerens fil.
+        file.ensure_exists().unwrap();
+        assert!(file.find("ny").is_ok());
+
+        std::fs::write(file.path(), "[{").unwrap();
+        assert!(file.load().unwrap_err().contains("apps.json"));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

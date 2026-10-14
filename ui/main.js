@@ -5,6 +5,7 @@ const els = {
   search: $("search"),
   sort: $("sort"),
   refresh: $("refresh"),
+  editApps: $("edit-apps"),
   error: $("error"),
   offline: $("offline"),
   favSection: $("fav-section"),
@@ -133,7 +134,7 @@ function render() {
   els.favSection.hidden = favs.length === 0;
   els.allTitle.textContent = favs.length ? "Øvrige" : "Apps";
   els.allTitle.parentElement.hidden = rest.length === 0;
-  els.empty.hidden = apps.length > 0;
+  els.empty.hidden = apps.length > 0 || !els.error.hidden;
   els.nomatch.hidden = apps.length === 0 || list.length > 0;
 }
 
@@ -173,12 +174,13 @@ async function toggleFavorite(app) {
   }
 }
 
-/** Henter manifest/ikon for alle apps, højst 4 ad gangen. */
-async function refreshAll() {
+/** Henter manifest/ikon for apps (standard: alle), højst 4 ad gangen. */
+async function refreshAll(list = apps) {
+  if (list.length === 0) return;
   els.refresh.disabled = true;
   let ok = 0;
   let offline = 0;
-  const queue = [...apps];
+  const queue = [...list];
   async function worker() {
     for (let app = queue.shift(); app; app = queue.shift()) {
       try {
@@ -263,6 +265,21 @@ function openSettings() {
   els.settings.showModal();
 }
 
+async function editApps() {
+  try {
+    await invoke("edit_apps_file");
+  } catch (err) {
+    showError(String(err));
+  }
+}
+
+/** Genindlæser listen (fx efter redigering af apps.json) og henter ikoner til nye apps. */
+async function reload() {
+  const known = new Set(apps.map((a) => a.id));
+  await load();
+  refreshAll(apps.filter((a) => !known.has(a.id) && !a.meta));
+}
+
 // ---------- Opsætning ----------
 
 els.sort.value = prefs.get("sort", "name");
@@ -279,7 +296,9 @@ els.search.addEventListener("keydown", (e) => {
     render();
   }
 });
-els.refresh.addEventListener("click", refreshAll);
+els.refresh.addEventListener("click", () => refreshAll());
+els.editApps.addEventListener("click", editApps);
+window.addEventListener("focus", reload);
 els.openSettings.addEventListener("click", openSettings);
 
 document.addEventListener("keydown", (e) => {
@@ -291,4 +310,4 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-load().then(refreshAll);
+load().then(() => refreshAll());

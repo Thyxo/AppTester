@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State, Url};
 
+use apps::AppsFile;
 use manifest::Meta;
 use store::Store;
 
@@ -35,9 +36,14 @@ fn cache_dir(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 #[tauri::command]
-fn list_apps(app: AppHandle, store: State<Store>) -> Result<Vec<AppView>, String> {
+fn list_apps(
+    app: AppHandle,
+    apps: State<AppsFile>,
+    store: State<Store>,
+) -> Result<Vec<AppView>, String> {
     let cache = cache_dir(&app).ok();
-    let views = apps::all()?
+    let views = apps
+        .load()?
         .iter()
         .map(|a| AppView {
             id: a.id.clone(),
@@ -57,8 +63,13 @@ fn list_apps(app: AppHandle, store: State<Store>) -> Result<Vec<AppView>, String
 
 /// Henter manifest + ikon på ny og opdaterer cachen.
 #[tauri::command]
-async fn refresh_meta(app: AppHandle, http: State<'_, Http>, id: String) -> Result<Meta, String> {
-    let entry = apps::find(&id)?;
+async fn refresh_meta(
+    app: AppHandle,
+    apps: State<'_, AppsFile>,
+    http: State<'_, Http>,
+    id: String,
+) -> Result<Meta, String> {
+    let entry = apps.find(&id)?;
     let meta = manifest::fetch(&http.0, &entry.url).await?;
     if let Err(err) = manifest::save_cached(&cache_dir(&app)?, &id, &meta) {
         eprintln!("Kunne ikke cache ikon for {id}: {err}");
@@ -67,8 +78,8 @@ async fn refresh_meta(app: AppHandle, http: State<'_, Http>, id: String) -> Resu
 }
 
 #[tauri::command]
-fn toggle_favorite(store: State<Store>, id: String) -> Result<bool, String> {
-    apps::find(&id)?;
+fn toggle_favorite(apps: State<AppsFile>, store: State<Store>, id: String) -> Result<bool, String> {
+    apps.find(&id)?;
     Ok(store.update(|s| {
         if s.favorites.remove(&id) {
             false
@@ -81,8 +92,8 @@ fn toggle_favorite(store: State<Store>, id: String) -> Result<bool, String> {
 
 /// Gemmer (eller sletter ved tom streng) bypass-token til appens preview.
 #[tauri::command]
-fn set_bypass_token(id: String, token: String) -> Result<bool, String> {
-    let entry = apps::find(&id)?;
+fn set_bypass_token(apps: State<AppsFile>, id: String, token: String) -> Result<bool, String> {
+    let entry = apps.find(&id)?;
     if entry.preview.is_none() {
         return Err(format!("{} har ingen \"preview\" i apps.json", entry.name));
     }
@@ -91,15 +102,33 @@ fn set_bypass_token(id: String, token: String) -> Result<bool, String> {
 }
 
 #[tauri::command]
-fn open_app(app: AppHandle, store: State<Store>, id: String) -> Result<(), String> {
-    let entry = apps::find(&id)?;
+fn open_app(
+    app: AppHandle,
+    apps: State<AppsFile>,
+    store: State<Store>,
+    id: String,
+) -> Result<(), String> {
+    let entry = apps.find(&id)?;
     let meta = cache_dir(&app)
         .ok()
         .and_then(|c| manifest::load_cached(&c, &id));
-    appwin::open(&app, entry, meta.as_ref())
+    appwin::open(&app, &entry, meta.as_ref())
         .map_err(|e| format!("{} kunne ikke åbnes: {e}", entry.name))?;
     store.update(|s| s.last_opened.insert(id, store::now_ms()));
     Ok(())
+}
+
+/// Åbner apps.json i standardeditoren (Notesblok, hvis .json ikke har en).
+#[tauri::command]
+fn edit_apps_file(app: AppHandle, apps: State<AppsFile>) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    apps.ensure_exists()
+        .map_err(|e| format!("Kan ikke oprette {}: {e}", apps.path().display()))?;
+    let path = apps.path().to_string_lossy().into_owned();
+    let opened = app.opener().open_path(&path, None::<&str>);
+    #[cfg(windows)]
+    let opened = opened.or_else(|_| app.opener().open_path(&path, Some("notepad.exe")));
+    opened.map_err(|e| format!("Kunne ikke åbne {path}: {e}"))
 }
 
 pub fn run() {
@@ -107,8 +136,13 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            let state_file = app.path().app_config_dir()?.join("state.json");
-            app.manage(Store::load(state_file));
+            let config_dir = app.path().app_config_dir()?;
+            let apps = AppsFile::new(config_dir.join("apps.json"));
+            if let Err(err) = apps.ensure_exists() {
+                eprintln!("Kunne ikke oprette {}: {err}", apps.path().display());
+            }
+            app.manage(apps);
+            app.manage(Store::load(config_dir.join("state.json")));
             app.manage(Http(manifest::http_client()));
             app.manage(appwin::Windows::default());
             app.on_menu_event(appwin::menu::handle);
@@ -121,6 +155,7 @@ pub fn run() {
             refresh_meta,
             toggle_favorite,
             set_bypass_token,
+            edit_apps_file,
             open_app
         ])
         .run(tauri::generate_context!())

@@ -147,7 +147,7 @@ section { margin-bottom: 20px; }
   border-radius: 8px;
   background: var(--notice-bg);
 }
-.notice.error { background: var(--error-bg); color: var(--error-fg); }
+.notice.error { background: var(--error-bg); color: var(--error-fg); white-space: pre-line; overflow-wrap: anywhere; }
 .muted { color: var(--muted); }
 
 .badge {

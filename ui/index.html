@@ -15,7 +15,8 @@
         <option value="name">Navn</option>
         <option value="recent">Senest åbnet</option>
       </select>
-      <button id="refresh" type="button" title="Hent ikoner og farver igen">↻ Opdater</button>
+      <button id="edit-apps" type="button" title="Åbn apps.json – listen opdateres, når du kommer tilbage">✎ Apps</button>
+      <button id="refresh" type="button" title="Hent ikoner og farver igen">↻</button>
       <button id="open-settings" type="button" title="Indstillinger" aria-label="Indstillinger">⚙</button>
     </div>
   </header>
@@ -30,7 +31,7 @@
       <h2 id="all-title">Apps</h2>
       <ul id="grid" class="grid"></ul>
     </section>
-    <p id="empty" class="muted" hidden>Ingen apps endnu – tilføj dem i <code>apps.json</code>.</p>
+    <p id="empty" class="muted" hidden>Ingen apps endnu – klik <strong>✎ Apps</strong> og tilføj dem i <code>apps.json</code>.</p>
     <p id="nomatch" class="muted" hidden>Ingen apps matcher søgningen.</p>
   </main>
   <dialog id="settings" aria-labelledby="settings-title">

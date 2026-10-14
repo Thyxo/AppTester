@@ -8,15 +8,14 @@ fn entry(app_id: &str) -> Result<keyring::Entry, String> {
         .map_err(|e| format!("Keychain er ikke tilgængelig: {e}"))
 }
 
+/// Gemt token, eller `None` hvis der intet er (eller keychain ikke kan læses –
+/// så åbnes preview bare uden token).
 pub fn bypass_token(app_id: &str) -> Option<String> {
-    match entry(app_id).ok()?.get_password() {
-        Ok(token) if !token.is_empty() => Some(token),
-        Ok(_) | Err(keyring::Error::NoEntry) => None,
-        Err(err) => {
-            eprintln!("Kunne ikke læse bypass-token for {app_id}: {err}");
-            None
-        }
-    }
+    entry(app_id)
+        .ok()?
+        .get_password()
+        .ok()
+        .filter(|t| !t.is_empty())
 }
 
 /// Gemmer tokenet, eller sletter det ved `None`/tom streng.

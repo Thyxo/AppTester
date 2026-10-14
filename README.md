@@ -37,8 +37,9 @@ Hvert push bygger desuden på Windows, macOS og Linux i GitHub Actions
 
 ## Tilføj en app
 
-Apps står i [`apps.json`](apps.json) i repo-roden. Der er ingen automatisk opdagelse –
-du tilføjer selv dem, du vil have:
+Klik **✎ Apps** i launcheren. Så åbnes din `apps.json` i standardeditoren
+(Notesblok, hvis .json ikke har en). Gem filen og skift tilbage til launcheren,
+så er listen opdateret – ingen genstart eller ny build.
 
 ```json
 [
@@ -54,12 +55,13 @@ du tilføjer selv dem, du vil have:
 
 (Calc+ er et eksempel – tjek de rigtige adresser i Vercel.)
 
-- `preview` (valgfri): en preview-adresse, du kan skifte til i app-vinduet.
 - `id`: små bogstaver, tal, `-` og `_`. Appens storage følger id'et – omdøb det ikke,
   hvis du vil beholde dens data.
-- Filen bygges ind i programmet: genstart `cargo tauri dev` (eller byg igen) efter ændringer.
-- Fejl i filen (dublet-id, forkert URL, stavefejl i et felt) vises i launcheren,
-  og `cargo test` fanger dem også.
+- `preview` (valgfri): en preview-adresse, du kan skifte til i app-vinduet.
+- Fejl i filen (dublet-id, forkert URL, stavefejl i et felt) vises øverst i launcheren
+  med filens placering.
+- Filen ligger i config-mappen (se *Hvor ligger data?*). Første gang oprettes den
+  med indholdet af [`apps.json`](apps.json) her i repoet.
 
 ## Launcheren
 
@@ -81,12 +83,13 @@ Menuen **Test** (på macOS i app-menulinjen):
 | DevTools (F12) | Åbn/luk udviklerværktøjer |
 | Genindlæs (Ctrl+R) | Almindelig genindlæsning |
 | Hard reload (Ctrl+Shift+R) | Afregistrerer service workers og tømmer Cache Storage, genindlæser fra netværket. localStorage/IndexedDB bevares |
-| Ryd alle data for appen… | Sletter localStorage, IndexedDB, cookies, cache og service worker for netop denne app (med bekræftelse) |
+| Ryd alle data for appen… | Sletter localStorage, IndexedDB, cookies, cache og service worker for netop denne app (med bekræftelse) og starter den forfra. Tager ca. 2 sek. |
 | Viewport | iPhone SE 375×667 · iPhone 15 393×852 · Pixel 8 412×915 · iPad 820×1180 · Desktop 1280×800 · Vend |
 | Deployment | Skift mellem production og `preview` fra apps.json |
 | Åbn i standardbrowser | Åbner appens adresse i din browser |
 
-Viewport ændrer kun vinduesstørrelsen (CSS-pixels) – ikke user-agent eller touch.
+Viewport giver siden præcis den valgte størrelse i CSS-pixels (der korrigeres for
+menulinjen). User-agent og touch ændres ikke.
 
 **Statuslinje** i vinduestitlen, opdateres hvert 1,5 s:
 `Stopwatch+ · production · SW ✓ · online`
@@ -132,7 +135,7 @@ App-vinduer (ét pr. app)
 ```
 AppTester/
 ├─ README.md
-├─ apps.json                     DIN app-liste
+├─ apps.json                     standard-app-liste (kopieres ud første gang)
 ├─ .github/workflows/build.yml   CI: Windows-installer, macOS + Linux test
 ├─ ui/                           launcher-frontend (ingen build-step)
 │  ├─ index.html
@@ -146,7 +149,7 @@ AppTester/
    └─ src/
       ├─ main.rs
       ├─ lib.rs                  opstart, kommandoer
-      ├─ apps.rs                 indlæs + valider apps.json
+      ├─ apps.rs                 læs + valider apps.json (frisk ved hver brug)
       ├─ manifest.rs             manifest, ikonvalg, cache
       ├─ store.rs                favoritter, senest åbnet, vinduesplacering
       ├─ secrets.rs              bypass-tokens i keychain
@@ -162,6 +165,7 @@ AppTester/
 | Hvad | Windows | macOS |
 |---|---|---|
 | Web-data pr. app | `%APPDATA%\dk.thyxo.pwalauncher\webdata\<app-id>\` | WebKit data store pr. app |
+| Din app-liste | `%APPDATA%\dk.thyxo.pwalauncher\apps.json` | `~/Library/Application Support/dk.thyxo.pwalauncher/apps.json` |
 | Favoritter, vinduer | `%APPDATA%\dk.thyxo.pwalauncher\state.json` | `~/Library/Application Support/dk.thyxo.pwalauncher/state.json` |
 | Bypass-tokens | Credential Manager | Keychain |
 | Ikon-cache | `%LOCALAPPDATA%\dk.thyxo.pwalauncher\meta\` | `~/Library/Caches/dk.thyxo.pwalauncher/meta/` |

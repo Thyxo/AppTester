@@ -239,19 +239,60 @@ fn confirm_clear(app: &AppHandle, win: &WebviewWindow, ctx: &std::sync::Arc<WinC
             if !confirmed {
                 return;
             }
-            if let Err(err) = win.clear_all_browsing_data() {
-                eprintln!("Kunne ikke rydde data for {}: {err}", ctx.entry.name);
-                return;
-            }
-            // Rydningen afsluttes asynkront i webviewet; giv den et øjeblik.
-            thread::spawn(move || {
-                thread::sleep(Duration::from_millis(400));
-                ctx.nav.reset_loaded();
-                status::reset_title(&win, &ctx);
-                let _ = win.navigate(ctx.start_url());
-            });
+            thread::spawn(move || clear_data(&win, &ctx));
         });
 }
+
+/// Rydder appens data og starter den forfra.
+///
+/// Platformens rydning sker asynkront uden besked om, hvornår den er færdig.
+/// Derfor ryddes den aktuelle origin først via JS, og vinduet står på
+/// `about:blank`, mens platformen rydder resten – så appen ikke når at skrive
+/// nye data, der bagefter forsvinder.
+fn clear_data(win: &WebviewWindow, ctx: &WinCtx) {
+    let _ = win.eval(CLEAR_ORIGIN_JS);
+    thread::sleep(Duration::from_millis(500));
+    let _ = win.navigate("about:blank".parse().expect("gyldig URL"));
+    thread::sleep(Duration::from_millis(300));
+    if let Err(err) = win.clear_all_browsing_data() {
+        eprintln!("Kunne ikke rydde data for {}: {err}", ctx.entry.name);
+    }
+    thread::sleep(Duration::from_millis(1200));
+    ctx.nav.reset_loaded();
+    status::reset_title(win, ctx);
+    let _ = win.navigate(ctx.start_url());
+}
+
+/// Rydder den aktuelle origin: storage, IndexedDB, Cache Storage, service workers
+/// og cookies, som JS kan se.
+const CLEAR_ORIGIN_JS: &str = r#"(async function () {
+  try { localStorage.clear(); sessionStorage.clear(); } catch (e) {}
+  try {
+    document.cookie.split(";").forEach(function (c) {
+      var name = c.split("=")[0].trim();
+      if (name) document.cookie = name + "=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/";
+    });
+  } catch (e) {}
+  try {
+    if (indexedDB.databases) {
+      var dbs = await indexedDB.databases();
+      dbs.forEach(function (d) { if (d.name) indexedDB.deleteDatabase(d.name); });
+    }
+  } catch (e) {}
+  try {
+    if (window.caches) {
+      var keys = await caches.keys();
+      await Promise.all(keys.map(function (k) { return caches.delete(k); }));
+    }
+  } catch (e) {}
+  try {
+    var sw = navigator.serviceWorker;
+    if (sw && sw.getRegistrations) {
+      var regs = await sw.getRegistrations();
+      await Promise.all(regs.map(function (r) { return r.unregister(); }));
+    }
+  } catch (e) {}
+})();"#;
 
 #[cfg(test)]
 mod tests {

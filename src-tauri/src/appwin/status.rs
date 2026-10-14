@@ -82,8 +82,14 @@ pub fn spawn_poller(app: AppHandle, label: String) {
     });
 }
 
-/// Windows leverer resultatet JSON-kodet (en JSON-streng); andre platforme rå.
 fn parse(raw: &str) -> Option<PageStatus> {
+    parse_eval(raw)
+}
+
+/// Fortolker resultatet af `eval_with_callback` for et script, der returnerer
+/// `JSON.stringify(...)`. Windows leverer det JSON-kodet (en JSON-streng);
+/// andre platforme leverer teksten rå.
+pub(super) fn parse_eval<T: serde::de::DeserializeOwned>(raw: &str) -> Option<T> {
     match serde_json::from_str::<serde_json::Value>(raw).ok()? {
         serde_json::Value::String(inner) => serde_json::from_str(&inner).ok(),
         other => serde_json::from_value(other).ok(),

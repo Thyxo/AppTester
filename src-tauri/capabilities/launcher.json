@@ -11,6 +11,7 @@
     "allow-refresh-meta",
     "allow-toggle-favorite",
     "allow-set-bypass-token",
+    "allow-edit-apps-file",
     "allow-open-app"
   ]
 }

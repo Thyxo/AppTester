@@ -7,14 +7,32 @@
     "frontendDist": "../ui"
   },
   "app": {
-    "windows": [],
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "launcher",
+        "title": "PWA Launcher",
+        "url": "index.html",
+        "width": 760,
+        "height": 560,
+        "minWidth": 360,
+        "minHeight": 360
+      }
+    ],
     "security": {
       "csp": "default-src 'self'; img-src 'self' data: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'"
     }
   },
   "bundle": {
     "active": true,
-    "targets": ["msi", "nsis", "dmg", "app", "deb", "appimage"],
+    "targets": [
+      "msi",
+      "nsis",
+      "dmg",
+      "app",
+      "deb",
+      "appimage"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

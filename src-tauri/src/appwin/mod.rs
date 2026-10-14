@@ -8,32 +8,11 @@ use tauri::webview::{NewWindowResponse, PageLoadEvent};
 use tauri::{AppHandle, Manager, Runtime, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tauri_plugin_opener::OpenerExt;
 
-/// Det launcheren skal vide for at åbne en app.
-#[derive(Debug, Clone)]
-pub struct AppSpec {
-    /// Stabilt id (fx Vercel-projektnavn). Bruges til vindues-label og data-mappe.
-    pub id: String,
-    pub name: String,
-    pub url: Url,
-}
-
-impl AppSpec {
-    pub fn new(id: &str, name: &str, url: &str) -> Result<Self, url::ParseError> {
-        Ok(Self {
-            id: sanitize_id(id),
-            name: name.to_string(),
-            url: Url::parse(url)?,
-        })
-    }
-
-    fn label(&self) -> String {
-        format!("app-{}", self.id)
-    }
-}
+use crate::apps::AppEntry;
 
 /// Åbner appen i sit eget vindue, eller fokuserer det, hvis det allerede er åbent.
-pub fn open<R: Runtime>(app: &AppHandle<R>, spec: &AppSpec) -> tauri::Result<WebviewWindow<R>> {
-    let label = spec.label();
+pub fn open<R: Runtime>(app: &AppHandle<R>, spec: &AppEntry) -> tauri::Result<WebviewWindow<R>> {
+    let label = format!("app-{}", spec.id);
     if let Some(win) = app.get_webview_window(&label) {
         win.unminimize()?;
         win.set_focus()?;
@@ -153,19 +132,6 @@ fn open_external<R: Runtime>(app: &AppHandle<R>, url: &Url) {
     }
 }
 
-/// Tilladte tegn i vindues-labels og mappenavne.
-fn sanitize_id(id: &str) -> String {
-    id.chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                c.to_ascii_lowercase()
-            } else {
-                '_'
-            }
-        })
-        .collect()
-}
-
 /// Stabil 16-byte id pr. app til WKWebsiteDataStore (to FNV-1a-hashes).
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 fn store_identifier(id: &str) -> [u8; 16] {
@@ -207,11 +173,5 @@ mod tests {
         nav.mark_loaded();
         assert!(nav.allows(&url("https://calcplus.dk/om")));
         assert!(!nav.allows(&url("https://example.com/")));
-    }
-
-    #[test]
-    fn ids_are_label_safe() {
-        assert_eq!(sanitize_id("Penge Trick!"), "penge_trick_");
-        assert_eq!(sanitize_id("notes-app"), "notes-app");
     }
 }

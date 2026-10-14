@@ -3,5 +3,5 @@
   "identifier": "launcher",
   "description": "Rettigheder for launcher-vinduet (lokalt indhold). App-vinduer med eksterne URL'er får ingen.",
   "windows": ["launcher"],
-  "permissions": ["core:default", "opener:default"]
+  "permissions": ["core:default", "allow-list-apps", "allow-open-app"]
 }

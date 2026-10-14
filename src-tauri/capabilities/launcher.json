@@ -10,6 +10,7 @@
     "allow-list-apps",
     "allow-refresh-meta",
     "allow-toggle-favorite",
+    "allow-set-bypass-token",
     "allow-open-app"
   ]
 }

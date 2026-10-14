@@ -149,3 +149,36 @@ section { margin-bottom: 20px; }
 }
 .notice.error { background: var(--error-bg); color: var(--error-fg); }
 .muted { color: var(--muted); }
+
+.badge {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  vertical-align: 1px;
+  background: var(--notice-bg);
+  color: var(--muted);
+}
+
+dialog {
+  width: min(520px, calc(100vw - 32px));
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--fg);
+}
+dialog::backdrop { background: rgb(0 0 0 / .4); }
+.settings-head { display: flex; justify-content: space-between; align-items: center; margin: 0; }
+.settings-head h2 { margin: 0; font-size: 15px; text-transform: none; letter-spacing: 0; color: var(--fg); }
+.settings-head button { border: none; cursor: pointer; }
+.small { font-size: 12px; }
+.settings-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.settings-list li { min-width: 0; display: grid; gap: 6px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); }
+.settings-list .row { display: flex; gap: 6px; }
+.settings-list input { flex: 1 1 0; width: 0; min-width: 0; }
+.settings-list button { cursor: pointer; }
+.ok { color: #16a34a; }
+.settings-list .muted { overflow-wrap: anywhere; }

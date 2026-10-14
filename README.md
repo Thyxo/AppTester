@@ -12,7 +12,7 @@ WebView2 på Windows, WebKit på macOS/Linux. Ingen Electron.
 | a | App-vindue med egen data-mappe, eksterne links i browser | ✅ |
 | b | App-liste i `apps.json` + launcher-vindue | ✅ |
 | c | Manifest-ikoner/farver, søg, sortering, favoritter, husk vinduesstørrelse | ✅ |
-| d | Testmenu: DevTools, viewports, hard reload, ryd data, SW-/offline-status | ⏳ |
+| d | Testmenu: DevTools, viewports, hard reload, ryd data, preview, SW-/offline-status | ✅ |
 
 ## Kom i gang
 
@@ -43,10 +43,18 @@ du tilføjer selv dem, du vil have:
 ```json
 [
   { "id": "stopwatchplus", "name": "Stopwatch+", "url": "https://stopwatchplus.vercel.app/" },
-  { "id": "calcplus",      "name": "Calc+",      "url": "https://calcplus.vercel.app/" }
+  {
+    "id": "calcplus",
+    "name": "Calc+",
+    "url": "https://calcplus.vercel.app/",
+    "preview": "https://calcplus-git-dev-thyxo.vercel.app/"
+  }
 ]
 ```
 
+(Calc+ er et eksempel – tjek de rigtige adresser i Vercel.)
+
+- `preview` (valgfri): en preview-adresse, du kan skifte til i app-vinduet.
 - `id`: små bogstaver, tal, `-` og `_`. Appens storage følger id'et – omdøb det ikke,
   hvis du vil beholde dens data.
 - Filen bygges ind i programmet: genstart `cargo tauri dev` (eller byg igen) efter ændringer.
@@ -64,6 +72,41 @@ du tilføjer selv dem, du vil have:
 - **App-vinduer** husker størrelse og placering pr. app. Baggrundsfarven kommer fra
   manifestets `background_color`, og lyst/mørkt tema fra `theme_color`.
 
+## Testmenuen (i hvert app-vindue)
+
+Menuen **Test** (på macOS i app-menulinjen):
+
+| Punkt | Hvad det gør |
+|---|---|
+| DevTools (F12) | Åbn/luk udviklerværktøjer |
+| Genindlæs (Ctrl+R) | Almindelig genindlæsning |
+| Hard reload (Ctrl+Shift+R) | Afregistrerer service workers og tømmer Cache Storage, genindlæser fra netværket. localStorage/IndexedDB bevares |
+| Ryd alle data for appen… | Sletter localStorage, IndexedDB, cookies, cache og service worker for netop denne app (med bekræftelse) |
+| Viewport | iPhone SE 375×667 · iPhone 15 393×852 · Pixel 8 412×915 · iPad 820×1180 · Desktop 1280×800 · Vend |
+| Deployment | Skift mellem production og `preview` fra apps.json |
+| Åbn i standardbrowser | Åbner appens adresse i din browser |
+
+Viewport ændrer kun vinduesstørrelsen (CSS-pixels) – ikke user-agent eller touch.
+
+**Statuslinje** i vinduestitlen, opdateres hvert 1,5 s:
+`Stopwatch+ · production · SW ✓ · online`
+
+| Del | Betydning |
+|---|---|
+| `SW ✓` | Siden styres af en service worker – kan køre offline |
+| `SW registreret` | Registreret, men styrer ikke siden endnu (typisk første besøg) |
+| `ingen SW` | Ingen service worker |
+| `offline – kører fra cache` | Ingen netværk, siden kører fra service workerens cache |
+
+### Beskyttede previews
+
+Har projektet Vercel Deployment Protection, så lav et token under
+**Vercel → projekt → Settings → Deployment Protection → Protection Bypass for Automation**,
+og indsæt det i launcheren under **⚙**. Tokenet gemmes i OS'ets keychain
+(Windows Credential Manager / macOS Keychain / Secret Service), aldrig i en fil.
+Når du skifter til preview, sendes det som `x-vercel-protection-bypass`, og Vercel
+sætter en cookie for resten af sessionen. Uden token kan du logge ind på Vercel i vinduet.
+
 ## Arkitektur
 
 ```
@@ -73,7 +116,7 @@ Rust-kerne (src-tauri/src)
   apps · manifest · store · appwin
         │ WebviewWindowBuilder
 App-vinduer (ét pr. app)
-  egen data-mappe · testmenu · status i titel
+  egen data-mappe · Test-menu · status i titel (eval, ingen IPC)
 ```
 
 | Valg | Løsning |
@@ -82,7 +125,7 @@ App-vinduer (ét pr. app)
 | Eksterne links | `on_navigation` / `on_new_window` → standardbrowser |
 | Redirects | Indtil første side er indlæst, følges redirects (fx til eget domæne eller Vercel-login) |
 | Test-UI | Native menulinje "Test" + status i vinduestitel |
-| Rettigheder | Kun launcher-vinduet må kalde `list_apps`/`open_app`; webapps i app-vinduer har ingen IPC-adgang |
+| Rettigheder | Kun launcher-vinduet må kalde Rust-kommandoerne; webapps i app-vinduer har ingen IPC-adgang |
 
 ## Filstruktur
 
@@ -106,10 +149,13 @@ AppTester/
       ├─ apps.rs                 indlæs + valider apps.json
       ├─ manifest.rs             manifest, ikonvalg, cache
       ├─ store.rs                favoritter, senest åbnet, vinduesplacering
-      └─ appwin/mod.rs           app-vinduer, data-mappe, link-politik
+      ├─ secrets.rs              bypass-tokens i keychain
+      └─ appwin/
+         ├─ mod.rs               app-vinduer, data-mappe, link-politik, deployment
+         ├─ menu.rs              Test-menu og handlinger
+         ├─ status.rs            SW-/offline-status i titlen
+         └─ viewport.rs          viewport-presets
 ```
-
-Planlagt (trin d): `appwin/{menu,viewport,status}.rs`.
 
 ## Hvor ligger data?
 
@@ -117,4 +163,5 @@ Planlagt (trin d): `appwin/{menu,viewport,status}.rs`.
 |---|---|---|
 | Web-data pr. app | `%APPDATA%\dk.thyxo.pwalauncher\webdata\<app-id>\` | WebKit data store pr. app |
 | Favoritter, vinduer | `%APPDATA%\dk.thyxo.pwalauncher\state.json` | `~/Library/Application Support/dk.thyxo.pwalauncher/state.json` |
+| Bypass-tokens | Credential Manager | Keychain |
 | Ikon-cache | `%LOCALAPPDATA%\dk.thyxo.pwalauncher\meta\` | `~/Library/Caches/dk.thyxo.pwalauncher/meta/` |

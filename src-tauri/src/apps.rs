@@ -15,7 +15,11 @@ pub struct AppEntry {
     /// så appens storage følger id'et – omdøb det ikke, hvis data skal bevares.
     pub id: String,
     pub name: String,
+    /// Production-adressen, som appen åbner på.
     pub url: Url,
+    /// Valgfri preview-adresse (fx `https://calcplus-git-dev-thyxo.vercel.app/`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview: Option<Url>,
 }
 
 /// Alle apps fra `apps.json`, eller en læsbar fejl hvis filen er ugyldig.
@@ -53,9 +57,13 @@ fn parse(json: &str) -> Result<Vec<AppEntry>, String> {
         if !seen.insert(app.id.as_str()) {
             return Err(format!("apps.json: id \"{}\" står der flere gange", app.id));
         }
-        if !matches!(app.url.scheme(), "http" | "https") {
+        let urls = std::iter::once(&app.url).chain(app.preview.as_ref());
+        if urls
+            .into_iter()
+            .any(|u| !matches!(u.scheme(), "http" | "https"))
+        {
             return Err(format!(
-                "apps.json: \"{}\" skal have en http(s)-adresse",
+                "apps.json: \"{}\" skal have http(s)-adresser",
                 app.id
             ));
         }
@@ -83,6 +91,12 @@ mod tests {
 
         let bad_url = r#"[{"id":"x","name":"X","url":"ftp://x.dk"}]"#;
         assert!(parse(bad_url).unwrap_err().contains("http"));
+
+        let bad_preview = r#"[{"id":"x","name":"X","url":"https://x.dk","preview":"file:///x"}]"#;
+        assert!(parse(bad_preview).unwrap_err().contains("http"));
+
+        let ok = r#"[{"id":"x","name":"X","url":"https://x.dk","preview":"https://x-git-dev.vercel.app"}]"#;
+        assert!(parse(ok).unwrap()[0].preview.is_some());
 
         let typo = r#"[{"id":"x","name":"X","ulr":"https://x.dk"}]"#;
         assert!(parse(typo).is_err());

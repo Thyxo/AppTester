@@ -1,6 +1,7 @@
 mod apps;
 mod appwin;
 mod manifest;
+mod secrets;
 mod store;
 
 use std::path::PathBuf;
@@ -18,6 +19,9 @@ struct AppView {
     id: String,
     name: String,
     url: Url,
+    preview: Option<Url>,
+    /// Om der er gemt et Vercel bypass-token i keychain.
+    has_bypass: bool,
     favorite: bool,
     last_opened: Option<u64>,
     /// Sidst hentede manifest-data (fra cache – virker offline).
@@ -39,6 +43,8 @@ fn list_apps(app: AppHandle, store: State<Store>) -> Result<Vec<AppView>, String
             id: a.id.clone(),
             name: a.name.clone(),
             url: a.url.clone(),
+            preview: a.preview.clone(),
+            has_bypass: a.preview.is_some() && secrets::bypass_token(&a.id).is_some(),
             favorite: store.read(|s| s.favorites.contains(&a.id)),
             last_opened: store.read(|s| s.last_opened.get(&a.id).copied()),
             meta: cache
@@ -73,6 +79,17 @@ fn toggle_favorite(store: State<Store>, id: String) -> Result<bool, String> {
     }))
 }
 
+/// Gemmer (eller sletter ved tom streng) bypass-token til appens preview.
+#[tauri::command]
+fn set_bypass_token(id: String, token: String) -> Result<bool, String> {
+    let entry = apps::find(&id)?;
+    if entry.preview.is_none() {
+        return Err(format!("{} har ingen \"preview\" i apps.json", entry.name));
+    }
+    secrets::set_bypass_token(&id, Some(&token))?;
+    Ok(secrets::bypass_token(&id).is_some())
+}
+
 #[tauri::command]
 fn open_app(app: AppHandle, store: State<Store>, id: String) -> Result<(), String> {
     let entry = apps::find(&id)?;
@@ -88,16 +105,22 @@ fn open_app(app: AppHandle, store: State<Store>, id: String) -> Result<(), Strin
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let state_file = app.path().app_config_dir()?.join("state.json");
             app.manage(Store::load(state_file));
             app.manage(Http(manifest::http_client()));
+            app.manage(appwin::Windows::default());
+            app.on_menu_event(appwin::menu::handle);
+            #[cfg(target_os = "macos")]
+            appwin::menu::install_app_menu(app.handle())?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             list_apps,
             refresh_meta,
             toggle_favorite,
+            set_bypass_token,
             open_app
         ])
         .run(tauri::generate_context!())

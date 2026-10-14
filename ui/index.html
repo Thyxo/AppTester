@@ -16,6 +16,7 @@
         <option value="recent">Senest åbnet</option>
       </select>
       <button id="refresh" type="button" title="Hent ikoner og farver igen">↻ Opdater</button>
+      <button id="open-settings" type="button" title="Indstillinger" aria-label="Indstillinger">⚙</button>
     </div>
   </header>
   <main>
@@ -32,6 +33,21 @@
     <p id="empty" class="muted" hidden>Ingen apps endnu – tilføj dem i <code>apps.json</code>.</p>
     <p id="nomatch" class="muted" hidden>Ingen apps matcher søgningen.</p>
   </main>
+  <dialog id="settings" aria-labelledby="settings-title">
+    <form method="dialog" class="settings-head">
+      <h2 id="settings-title">Preview-adgang (Vercel)</h2>
+      <button type="submit" aria-label="Luk">✕</button>
+    </form>
+    <p class="muted small">
+      Beskyttede previews kræver et <em>Protection Bypass for Automation</em>-token
+      (Vercel → projekt → Settings → Deployment Protection). Tokenet gemmes i
+      systemets keychain – aldrig i en fil.
+    </p>
+    <ul id="settings-list" class="settings-list"></ul>
+    <p id="settings-empty" class="muted small" hidden>
+      Ingen apps har en <code>"preview"</code>-adresse i <code>apps.json</code>.
+    </p>
+  </dialog>
   <script src="main.js"></script>
 </body>
 </html>

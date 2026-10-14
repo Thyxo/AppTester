@@ -5,6 +5,7 @@ fn main() {
         "list_apps",
         "refresh_meta",
         "toggle_favorite",
+        "set_bypass_token",
         "open_app",
     ]);
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(manifest))

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-bypass-token"
+description = "Enables the set_bypass_token command without any pre-configured scope."
+commands.allow = ["set_bypass_token"]
+
+[[permission]]
+identifier = "deny-set-bypass-token"
+description = "Denies the set_bypass_token command without any pre-configured scope."
+commands.deny = ["set_bypass_token"]

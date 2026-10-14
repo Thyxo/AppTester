@@ -13,6 +13,10 @@ const els = {
   allTitle: $("all-title"),
   empty: $("empty"),
   nomatch: $("nomatch"),
+  openSettings: $("open-settings"),
+  settings: $("settings"),
+  settingsList: $("settings-list"),
+  settingsEmpty: $("settings-empty"),
 };
 
 let apps = [];
@@ -71,6 +75,13 @@ function tile(app) {
   const name = document.createElement("span");
   name.className = "name";
   name.textContent = app.name;
+  if (app.preview) {
+    const badge = document.createElement("span");
+    badge.className = "badge";
+    badge.textContent = "preview";
+    badge.title = "Skift i app-vinduets menu: Test → Deployment";
+    name.append(badge);
+  }
 
   const host = document.createElement("span");
   host.className = "host";
@@ -187,6 +198,71 @@ async function refreshAll() {
   els.refresh.disabled = false;
 }
 
+// ---------- Indstillinger: bypass-tokens ----------
+
+function settingsRow(app) {
+  const li = document.createElement("li");
+
+  const title = document.createElement("strong");
+  title.textContent = app.name;
+  const url = document.createElement("span");
+  url.className = "muted small";
+  url.textContent = app.preview;
+
+  const row = document.createElement("div");
+  row.className = "row";
+  const input = document.createElement("input");
+  input.type = "password";
+  input.autocomplete = "off";
+  input.placeholder = app.hasBypass ? "•••••••• (gemt)" : "Bypass-token";
+  const save = document.createElement("button");
+  save.type = "button";
+  save.textContent = "Gem";
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.textContent = "Fjern";
+  remove.disabled = !app.hasBypass;
+  row.append(input, save, remove);
+
+  const status = document.createElement("span");
+  status.className = "small";
+  status.setAttribute("role", "status");
+
+  async function store(token) {
+    status.className = "small";
+    status.textContent = "";
+    try {
+      app.hasBypass = await invoke("set_bypass_token", { id: app.id, token });
+      input.value = "";
+      input.placeholder = app.hasBypass ? "•••••••• (gemt)" : "Bypass-token";
+      remove.disabled = !app.hasBypass;
+      status.className = "small ok";
+      status.textContent = app.hasBypass ? "✓ Gemt i keychain" : "✓ Fjernet";
+    } catch (err) {
+      status.className = "small warn";
+      status.textContent = String(err);
+    }
+  }
+  save.addEventListener("click", () => {
+    if (input.value.trim()) store(input.value);
+  });
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && input.value.trim()) store(input.value);
+  });
+  remove.addEventListener("click", () => store(""));
+
+  li.append(title, url, row, status);
+  return li;
+}
+
+function openSettings() {
+  const withPreview = apps.filter((a) => a.preview);
+  withPreview.sort((a, b) => a.name.localeCompare(b.name, "da"));
+  els.settingsList.replaceChildren(...withPreview.map(settingsRow));
+  els.settingsEmpty.hidden = withPreview.length > 0;
+  els.settings.showModal();
+}
+
 // ---------- Opsætning ----------
 
 els.sort.value = prefs.get("sort", "name");
@@ -204,6 +280,7 @@ els.search.addEventListener("keydown", (e) => {
   }
 });
 els.refresh.addEventListener("click", refreshAll);
+els.openSettings.addEventListener("click", openSettings);
 
 document.addEventListener("keydown", (e) => {
   const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement;

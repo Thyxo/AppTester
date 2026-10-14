@@ -1,19 +1,31 @@
 //! Enheder (iPhone, Pixel, iPad …) og layout-matematik for mockup-vinduet.
 //!
-//! Vinduet består af en værktøjslinje øverst og en telefonramme under den.
-//! Rammen skaleres med vinduet (højst 100 %), og appens webview lægges præcis
-//! over rammens skærm med zoom = skala, så appen altid ser enhedens viewport.
+//! Vinduet består af en værktøjslinje øverst og en enhed under den. Enheden
+//! skaleres med vinduet (højst 100 %), og appens webview lægges præcis over
+//! skærmens indholdsområde med zoom = skala, så appen altid ser enhedens viewport.
+//!
+//! Indholdsområdet er skærmen minus statuslinje og hjem-indikator – som for en
+//! installeret PWA på telefonen. Det holder også appens firkantede hjørner væk
+//! fra skærmens runde hjørner.
 
 use serde::Serialize;
 
 /// Værktøjslinjens højde (logiske px, skaleres ikke).
 pub const TOOLBAR: f64 = 64.0;
-/// Luft rundt om rammen (til sideknapper og skygge).
-pub const PAD: f64 = 12.0;
+/// Luft rundt om enheden (til sideknapper og skygge).
+pub const PAD: f64 = 14.0;
 /// Værktøjslinjen skal kunne være der.
-pub const MIN_WIDTH: f64 = 340.0;
+pub const MIN_WIDTH: f64 = 360.0;
 /// Mindste tilladte skala.
 pub const MIN_SCALE: f64 = 0.35;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Kind {
+    Phone,
+    Tablet,
+    Desktop,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -23,88 +35,160 @@ pub enum Notch {
     Island,
     /// Hulkamera (Android).
     Punch,
-    /// Hjemknap (iPhone SE).
+    /// Hjemknap, højttaler og kamera i rammen (iPhone SE).
     HomeButton,
-    /// Lille kameraprik i kanten (iPad).
+    /// Lille kameraprik i rammen (iPad).
     Camera,
+}
+
+/// Afstande i logiske punkter (top, højre, bund, venstre).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct Insets {
+    pub top: f64,
+    pub right: f64,
+    pub bottom: f64,
+    pub left: f64,
+}
+
+impl Insets {
+    const fn new(top: f64, right: f64, bottom: f64, left: f64) -> Self {
+        Self {
+            top,
+            right,
+            bottom,
+            left,
+        }
+    }
+
+    fn scaled(self, s: f64) -> Self {
+        Self::new(self.top * s, self.right * s, self.bottom * s, self.left * s)
+    }
 }
 
 #[derive(Debug)]
 pub struct Device {
     pub id: &'static str,
     pub name: &'static str,
-    /// Viewport i CSS-pixels (portræt).
-    pub width: f64,
-    pub height: f64,
-    /// Rammens tykkelse (portræt).
+    pub kind: Kind,
+    /// Hele skærmen i punkter (portræt).
+    pub screen_w: f64,
+    pub screen_h: f64,
+    /// Fra enhedens yderkant til skærmen (portræt).
     pub side: f64,
     pub top: f64,
     pub bottom: f64,
-    /// Rammens hjørneradius.
+    /// Den lyse metalkant yderst (resten af `side` er sort bezel).
+    pub rim: f64,
     pub radius: f64,
+    pub screen_radius: f64,
     pub notch: Notch,
+    /// Statuslinje/hjem-indikator m.m., som appen ikke tegner i.
+    pub portrait: Insets,
+    pub landscape: Insets,
     pub can_rotate: bool,
 }
 
 pub const DEVICES: &[Device] = &[
     Device {
-        id: "iphone-15",
-        name: "iPhone 15",
-        width: 393.0,
-        height: 852.0,
-        side: 14.0,
-        top: 46.0,
-        bottom: 26.0,
-        radius: 62.0,
+        id: "iphone-15-pro",
+        name: "iPhone 15 Pro",
+        kind: Kind::Phone,
+        screen_w: 393.0,
+        screen_h: 852.0,
+        side: 13.0,
+        top: 13.0,
+        bottom: 13.0,
+        rim: 4.0,
+        radius: 60.0,
+        screen_radius: 47.0,
         notch: Notch::Island,
+        portrait: Insets::new(59.0, 0.0, 34.0, 0.0),
+        landscape: Insets::new(0.0, 59.0, 21.0, 59.0),
+        can_rotate: true,
+    },
+    Device {
+        id: "iphone-15-pro-max",
+        name: "iPhone 15 Pro Max",
+        kind: Kind::Phone,
+        screen_w: 430.0,
+        screen_h: 932.0,
+        side: 13.0,
+        top: 13.0,
+        bottom: 13.0,
+        rim: 4.0,
+        radius: 61.0,
+        screen_radius: 48.0,
+        notch: Notch::Island,
+        portrait: Insets::new(59.0, 0.0, 34.0, 0.0),
+        landscape: Insets::new(0.0, 59.0, 21.0, 59.0),
         can_rotate: true,
     },
     Device {
         id: "iphone-se",
         name: "iPhone SE",
-        width: 375.0,
-        height: 667.0,
-        side: 18.0,
-        top: 96.0,
-        bottom: 96.0,
+        kind: Kind::Phone,
+        screen_w: 375.0,
+        screen_h: 667.0,
+        side: 20.0,
+        top: 92.0,
+        bottom: 92.0,
+        rim: 3.0,
         radius: 56.0,
+        screen_radius: 0.0,
         notch: Notch::HomeButton,
+        portrait: Insets::new(20.0, 0.0, 0.0, 0.0),
+        landscape: Insets::new(0.0, 0.0, 0.0, 0.0),
         can_rotate: true,
     },
     Device {
         id: "pixel-8",
         name: "Pixel 8",
-        width: 412.0,
-        height: 915.0,
+        kind: Kind::Phone,
+        screen_w: 412.0,
+        screen_h: 915.0,
         side: 12.0,
-        top: 38.0,
-        bottom: 22.0,
-        radius: 48.0,
+        top: 12.0,
+        bottom: 12.0,
+        rim: 3.0,
+        radius: 42.0,
+        screen_radius: 30.0,
         notch: Notch::Punch,
+        portrait: Insets::new(24.0, 0.0, 24.0, 0.0),
+        landscape: Insets::new(24.0, 0.0, 24.0, 24.0),
         can_rotate: true,
     },
     Device {
-        id: "ipad",
-        name: "iPad",
-        width: 820.0,
-        height: 1180.0,
-        side: 26.0,
-        top: 26.0,
-        bottom: 26.0,
-        radius: 40.0,
+        id: "ipad-air",
+        name: "iPad Air",
+        kind: Kind::Tablet,
+        screen_w: 820.0,
+        screen_h: 1180.0,
+        side: 23.0,
+        top: 23.0,
+        bottom: 23.0,
+        rim: 3.0,
+        radius: 41.0,
+        screen_radius: 18.0,
         notch: Notch::Camera,
+        portrait: Insets::new(24.0, 0.0, 20.0, 0.0),
+        landscape: Insets::new(24.0, 0.0, 20.0, 0.0),
         can_rotate: true,
     },
     Device {
         id: "desktop",
         name: "Desktop",
-        width: 1280.0,
-        height: 800.0,
-        side: 0.0,
-        top: 0.0,
-        bottom: 0.0,
+        kind: Kind::Desktop,
+        screen_w: 1280.0,
+        screen_h: 800.0,
+        side: 1.0,
+        top: 30.0,
+        bottom: 1.0,
+        rim: 1.0,
         radius: 10.0,
+        screen_radius: 0.0,
         notch: Notch::None,
+        portrait: Insets::new(0.0, 0.0, 0.0, 0.0),
+        landscape: Insets::new(0.0, 0.0, 0.0, 0.0),
         can_rotate: false,
     },
 ];
@@ -121,28 +205,36 @@ pub struct Rect {
     pub h: f64,
 }
 
-/// Alt hvad frame-siden og appens webview skal placeres efter.
+/// Alt hvad frame-siden og appens webview skal placeres efter (vindueskoordinater).
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Layout {
     pub device: &'static str,
+    pub kind: Kind,
     pub landscape: bool,
     pub scale: f64,
-    /// Hele rammen (telefonens yderkant).
+    /// Hele enheden (yderkant).
     pub phone: Rect,
-    /// Skærmen, hvor appens webview ligger.
+    /// Hele skærmen.
     pub screen: Rect,
+    /// Appens område (skærm minus `insets`).
+    pub content: Rect,
+    /// Skalerede afstande fra skærmkant til appens område.
+    pub insets: Insets,
     pub radius: f64,
+    pub screen_radius: f64,
+    pub rim: f64,
     pub notch: Notch,
     /// Viewport i CSS-pixels, som appen ser.
     pub viewport: (f64, f64),
 }
 
 impl Device {
-    /// Rammens ydre størrelse ved skala 1. Landskab = drejet 90° mod uret
-    /// (toppen af telefonen til venstre).
+    /// Enhedens ydre størrelse ved skala 1. Landskab = drejet 90° mod uret
+    /// (toppen af enheden til venstre).
     pub fn frame_size(&self, landscape: bool) -> (f64, f64) {
-        let w = self.side * 2.0 + self.width;
-        let h = self.top + self.height + self.bottom;
+        let w = self.side * 2.0 + self.screen_w;
+        let h = self.top + self.screen_h + self.bottom;
         if landscape {
             (h, w)
         } else {
@@ -158,15 +250,29 @@ impl Device {
         }
     }
 
-    pub fn viewport(&self, landscape: bool) -> (f64, f64) {
+    fn screen_size(&self, landscape: bool) -> (f64, f64) {
         if landscape {
-            (self.height, self.width)
+            (self.screen_h, self.screen_w)
         } else {
-            (self.width, self.height)
+            (self.screen_w, self.screen_h)
         }
     }
 
-    /// Vinduesstørrelse, der passer præcis til rammen ved skala `scale`.
+    pub fn insets(&self, landscape: bool) -> Insets {
+        if landscape {
+            self.landscape
+        } else {
+            self.portrait
+        }
+    }
+
+    pub fn viewport(&self, landscape: bool) -> (f64, f64) {
+        let (w, h) = self.screen_size(landscape);
+        let i = self.insets(landscape);
+        (w - i.left - i.right, h - i.top - i.bottom)
+    }
+
+    /// Vinduesstørrelse, der passer præcis til enheden ved skala `scale`.
     pub fn window_size(&self, landscape: bool, scale: f64) -> (f64, f64) {
         let (fw, fh) = self.frame_size(landscape);
         (
@@ -190,7 +296,7 @@ impl Device {
         s.clamp(MIN_SCALE, 1.0)
     }
 
-    /// Placering af ramme og skærm i et vindue af størrelsen `win_w` × `win_h`.
+    /// Placering af enhed, skærm og app i et vindue af størrelsen `win_w` × `win_h`.
     pub fn layout(&self, landscape: bool, win_w: f64, win_h: f64) -> Layout {
         let (fw, fh) = self.frame_size(landscape);
         let avail_w = (win_w - 2.0 * PAD).max(1.0);
@@ -204,20 +310,33 @@ impl Device {
             h: (fh * scale).round(),
         };
         let (ox, oy) = self.screen_offset(landscape);
-        let (vw, vh) = self.viewport(landscape);
+        let (sw, sh) = self.screen_size(landscape);
         let screen = Rect {
             x: (phone.x + ox * scale).round(),
             y: (phone.y + oy * scale).round(),
+            w: (sw * scale).round(),
+            h: (sh * scale).round(),
+        };
+        let insets = self.insets(landscape);
+        let (vw, vh) = self.viewport(landscape);
+        let content = Rect {
+            x: (screen.x + insets.left * scale).round(),
+            y: (screen.y + insets.top * scale).round(),
             w: (vw * scale).round(),
             h: (vh * scale).round(),
         };
         Layout {
             device: self.id,
+            kind: self.kind,
             landscape,
             scale,
             phone,
             screen,
+            content,
+            insets: insets.scaled(scale),
             radius: self.radius * scale,
+            screen_radius: self.screen_radius * scale,
+            rim: self.rim * scale,
             notch: self.notch,
             viewport: (vw, vh),
         }
@@ -229,7 +348,14 @@ mod tests {
     use super::*;
 
     fn iphone() -> &'static Device {
-        &DEVICES[index_of("iphone-15")]
+        &DEVICES[index_of("iphone-15-pro")]
+    }
+
+    fn inside(inner: Rect, outer: Rect) -> bool {
+        inner.x >= outer.x
+            && inner.y >= outer.y
+            && inner.x + inner.w <= outer.x + outer.w
+            && inner.y + inner.h <= outer.y + outer.h
     }
 
     #[test]
@@ -239,11 +365,10 @@ mod tests {
         let l = d.layout(false, w, h);
         assert!((l.scale - 1.0).abs() < 1e-9);
         assert_eq!((l.screen.w, l.screen.h), (393.0, 852.0));
-        assert_eq!(l.viewport, (393.0, 852.0));
-        // Skærmen ligger inde i rammen.
-        assert!(l.screen.x >= l.phone.x && l.screen.y >= l.phone.y);
-        assert!(l.screen.x + l.screen.w <= l.phone.x + l.phone.w);
-        assert!(l.screen.y + l.screen.h <= l.phone.y + l.phone.h);
+        // Uden statuslinje (59) og hjem-indikator (34).
+        assert_eq!(l.viewport, (393.0, 759.0));
+        assert_eq!((l.content.w, l.content.h), (393.0, 759.0));
+        assert!(inside(l.content, l.screen) && inside(l.screen, l.phone));
     }
 
     #[test]
@@ -252,9 +377,9 @@ mod tests {
         let (w, h) = d.window_size(false, 0.5);
         let l = d.layout(false, w, h);
         assert!((l.scale - 0.5).abs() < 0.01);
-        // Appen ser stadig 393×852 – skærmen er bare zoomet ned.
-        assert!((l.screen.w / l.scale - 393.0).abs() < 2.0);
-        assert!((l.screen.h / l.scale - 852.0).abs() < 2.0);
+        // Appen ser stadig samme viewport – den er bare zoomet ned.
+        assert!((l.content.w / l.scale - 393.0).abs() < 2.0);
+        assert!((l.content.h / l.scale - 759.0).abs() < 2.0);
     }
 
     #[test]
@@ -263,7 +388,6 @@ mod tests {
         let (_, h) = d.window_size(false, 0.6);
         let l = d.layout(false, 2000.0, h);
         assert!((l.scale - 0.6).abs() < 0.01);
-        // Rammen centreres; forholdet bevares.
         let (fw, fh) = d.frame_size(false);
         assert!((l.phone.w / l.phone.h - fw / fh).abs() < 0.01);
     }
@@ -275,12 +399,46 @@ mod tests {
     }
 
     #[test]
-    fn landscape_swaps_viewport() {
+    fn landscape_uses_landscape_insets() {
         let d = iphone();
         let (w, h) = d.window_size(true, 1.0);
         let l = d.layout(true, w, h);
-        assert_eq!(l.viewport, (852.0, 393.0));
         assert_eq!((l.screen.w, l.screen.h), (852.0, 393.0));
+        assert_eq!(l.viewport, (852.0 - 118.0, 393.0 - 21.0));
+        assert!(inside(l.content, l.screen));
+    }
+
+    /// Appens firkantede hjørner må højst stikke ~2 pt ud over skærmens runde hjørner.
+    #[test]
+    fn content_corners_stay_inside_rounded_screen() {
+        for d in DEVICES {
+            for landscape in [false, true] {
+                let (sw, sh) = d.screen_size(landscape);
+                let i = d.insets(landscape);
+                let r = d.screen_radius;
+                // Hjørnerne af indholdsområdet, målt fra skærmens hjørner.
+                for (dx, dy) in [
+                    (i.left, i.top),
+                    (i.right, i.top),
+                    (i.left, i.bottom),
+                    (i.right, i.bottom),
+                ] {
+                    if dx >= r || dy >= r {
+                        continue;
+                    }
+                    // Afstand fra hjørnecirklens centrum skal være ≤ r (+2 pt).
+                    let (cx, cy) = (r - dx, r - dy);
+                    let dist = (cx * cx + cy * cy).sqrt();
+                    assert!(
+                        dist <= r + 2.0,
+                        "{} {}: hjørne stikker {:.1} pt ud ({sw}×{sh})",
+                        d.name,
+                        if landscape { "landskab" } else { "portræt" },
+                        dist - r
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -288,7 +446,7 @@ mod tests {
         let d = iphone();
         let ((min_w, min_h), (max_w, max_h)) = d.size_limits(false);
         assert!(min_w >= MIN_WIDTH && min_h < max_h && min_w <= max_w);
-        // 1080p-skærm (1920×1040 logisk): iPhone 15 kan ikke være i fuld størrelse.
+        // 1080p-skærm (1920×1040 logisk): iPhone 15 Pro kan ikke være i fuld størrelse.
         let s = d.fit_scale(false, 1920.0, 1040.0);
         assert!(s < 1.0 && s > 0.8);
         assert_eq!(index_of("findes-ikke"), 0);

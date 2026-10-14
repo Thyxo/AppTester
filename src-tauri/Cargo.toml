@@ -1,6 +1,6 @@
 [package]
 name = "pwa-launcher"
-version = "0.2.0"
+version = "0.3.0"
 description = "Native launcher til at køre og teste PWAs/webapps"
 edition = "2021"
 rust-version = "1.77"

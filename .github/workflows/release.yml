@@ -40,9 +40,10 @@ jobs:
           body: |
             **Installation på Windows**
             1. Hent `PWA.Launcher_..._x64-setup.exe` herunder og dobbeltklik.
-            2. Windows SmartScreen advarer, fordi installeren ikke er kodesigneret:
+            2. Er en ældre version installeret, så vælg **Uninstall before installing** (dine apps og data bevares).
+            3. Windows SmartScreen advarer, fordi installeren ikke er kodesigneret:
                klik **Flere oplysninger → Kør alligevel**.
-            3. Start **PWA Launcher** fra Start-menuen, klik **✎ Apps** og tilføj dine apps.
+            4. Start **PWA Launcher** fra Start-menuen, klik **+ Tilføj app** og indsæt et link.
 
             `.msi`-filen er et alternativ til `.exe`, fx til installation for alle brugere.
           files: |

@@ -4,81 +4,102 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>PWA Launcher</title>
+  <script src="theme.js"></script>
+  <link rel="stylesheet" href="theme.css">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <header>
-    <h1>PWA Launcher</h1>
-    <div class="toolbar">
-      <input id="search" type="search" placeholder="Søg…  ( / )" autocomplete="off" aria-label="Søg i apps">
-      <select id="sort" aria-label="Sortering">
-        <option value="name">Navn</option>
-        <option value="recent">Senest åbnet</option>
-      </select>
-      <button id="add-app" class="primary" type="button" title="Tilføj en app ud fra et link">+ Tilføj app</button>
-      <button id="refresh" type="button" title="Hent ikoner og farver igen">↻</button>
-      <button id="open-settings" type="button" title="Indstillinger" aria-label="Indstillinger">⚙</button>
-    </div>
-  </header>
-  <main>
+  <div class="page">
+    <header class="top">
+      <div class="brand">
+        <img class="logo" src="logo.svg" alt="">
+        <div>
+          <small>PWA Launcher</small>
+          <strong id="greeting">Hej</strong>
+        </div>
+      </div>
+      <div class="top-actions">
+        <button id="theme-btn" class="circle" type="button" title="Skift tema" aria-label="Skift tema"></button>
+        <button id="refresh" class="circle" type="button" title="Hent ikoner og farver igen" aria-label="Opdater ikoner"></button>
+        <button id="open-settings" class="circle" type="button" title="Indstillinger" aria-label="Indstillinger"></button>
+      </div>
+    </header>
+
+    <section class="hero">
+      <h1>Test dine apps<br>som rigtige apps</h1>
+      <label class="search">
+        <span class="search-icon" aria-hidden="true"></span>
+        <input id="search" type="search" placeholder="Søg i dine apps  ( / )" autocomplete="off" aria-label="Søg i apps">
+      </label>
+    </section>
+
+    <nav class="stats" aria-label="Vis">
+      <button class="stat c1" type="button" data-filter="all"><b id="count-all">0</b><span>Alle</span></button>
+      <button class="stat c2" type="button" data-filter="fav"><b id="count-fav">0</b><span>Favoritter</span></button>
+      <button class="stat c3" type="button" data-filter="recent"><b id="count-recent">0</b><span>Senest åbnet</span></button>
+      <button id="add-app" class="stat c4" type="button" title="Tilføj en app ud fra et link"><b>+</b><span>Tilføj app</span></button>
+    </nav>
+
     <p id="error" class="notice error" role="alert" hidden></p>
     <p id="offline" class="notice" hidden>Offline – viser gemte ikoner.</p>
-    <section id="fav-section" hidden>
-      <h2>Favoritter</h2>
-      <ul id="fav-grid" class="grid"></ul>
-    </section>
-    <section>
-      <h2 id="all-title">Apps</h2>
-      <ul id="grid" class="grid"></ul>
-    </section>
-    <p id="empty" class="muted" hidden>Ingen apps endnu – klik <strong>+ Tilføj app</strong> og indsæt et link.</p>
-    <p id="nomatch" class="muted" hidden>Ingen apps matcher søgningen.</p>
-  </main>
+
+    <ul id="grid" class="cards" aria-label="Apps"></ul>
+    <p id="empty" class="empty" hidden>Ingen apps endnu – klik <strong>+ Tilføj app</strong> og indsæt et link.</p>
+    <p id="nomatch" class="empty" hidden>Ingen apps her.</p>
+  </div>
+
   <dialog id="add-dialog" aria-labelledby="add-title">
     <form id="add-form" method="dialog">
-      <div class="settings-head">
+      <div class="dialog-head">
         <h2 id="add-title">Tilføj app</h2>
-        <button type="button" data-close aria-label="Luk">✕</button>
+        <button class="circle small" type="button" data-close aria-label="Luk">✕</button>
       </div>
       <label class="field">
         <span>Link til appen</span>
-        <input id="add-url" type="text" inputmode="url" placeholder="https://monizzz.vercel.app" autocomplete="off" required>
+        <input id="add-url" type="text" inputmode="url" placeholder="monizzz.vercel.app" autocomplete="off" required>
       </label>
       <label class="field">
-        <span>Navn <em class="muted">(valgfrit – hentes fra appen)</em></span>
+        <span>Navn <em>(valgfrit – hentes fra appen)</em></span>
         <input id="add-name" type="text" autocomplete="off">
       </label>
       <details>
-        <summary class="muted small">Preview-adresse (valgfri)</summary>
+        <summary>Preview-adresse (valgfri)</summary>
         <label class="field">
           <span>Preview-link</span>
-          <input id="add-preview" type="text" inputmode="url" placeholder="https://monizzz-git-dev-thyxo.vercel.app" autocomplete="off">
+          <input id="add-preview" type="text" inputmode="url" placeholder="monizzz-git-dev-thyxo.vercel.app" autocomplete="off">
         </label>
       </details>
-      <p id="add-error" class="small warn" role="alert" hidden></p>
+      <p id="add-error" class="form-error" role="alert" hidden></p>
       <div class="actions">
-        <button type="button" data-close>Annuller</button>
+        <button class="ghost" type="button" data-close>Annuller</button>
         <button id="add-submit" class="primary" type="submit">Tilføj</button>
       </div>
     </form>
   </dialog>
 
   <dialog id="settings" aria-labelledby="settings-title">
-    <form method="dialog" class="settings-head">
-      <h2 id="settings-title">Preview-adgang (Vercel)</h2>
-      <button type="submit" aria-label="Luk">✕</button>
-    </form>
-    <p class="muted small">
+    <div class="dialog-head">
+      <h2 id="settings-title">Indstillinger</h2>
+      <button class="circle small" type="button" data-close aria-label="Luk">✕</button>
+    </div>
+
+    <h3>Tema</h3>
+    <div id="theme-list" class="themes" role="radiogroup" aria-label="Tema"></div>
+
+    <h3>Preview-adgang (Vercel)</h3>
+    <p class="hint">
       Beskyttede previews kræver et <em>Protection Bypass for Automation</em>-token
-      (Vercel → projekt → Settings → Deployment Protection). Tokenet gemmes i
-      systemets keychain – aldrig i en fil.
+      (Vercel → projekt → Settings → Deployment Protection). Det gemmes i systemets
+      keychain – aldrig i en fil.
     </p>
     <ul id="settings-list" class="settings-list"></ul>
-    <p id="settings-empty" class="muted small" hidden>
+    <p id="settings-empty" class="hint" hidden>
       Ingen apps har en preview-adresse endnu (tilføj den under <strong>+ Tilføj app</strong>).
     </p>
-    <p class="small"><button id="edit-apps" class="link" type="button">Rediger apps.json manuelt</button></p>
+
+    <p class="hint"><button id="edit-apps" class="link" type="button">Rediger apps.json manuelt</button></p>
   </dialog>
+
   <script src="main.js"></script>
 </body>
 </html>

@@ -3,13 +3,15 @@
 <head>
   <meta charset="utf-8">
   <title>Ramme</title>
+  <script src="theme.js"></script>
+  <link rel="stylesheet" href="theme.css">
   <link rel="stylesheet" href="frame.css">
 </head>
 <body>
   <header id="bar" class="drag">
     <div class="row">
       <span id="name" class="name"></span>
-      <button id="dep" class="chip" type="button" title="Skift mellem production og preview"></button>
+      <button id="dep" class="chip" type="button"></button>
       <span id="sw" class="chip"></span>
       <span id="net" class="chip"></span>
       <span class="spacer"></span>
@@ -27,13 +29,27 @@
     </div>
   </header>
 
-  <div id="phone" class="drag" hidden>
-    <div id="screen"></div>
-    <div id="notch"></div>
-    <div id="home"></div>
-    <div class="btn" id="btn-a"></div>
-    <div class="btn" id="btn-b"></div>
-    <div class="btn" id="btn-c"></div>
+  <!-- Enhedens kabinet, tegnet i portræt (drejes ved landskab). -->
+  <div id="shell" class="drag" hidden>
+    <div id="bezel"></div>
+    <div id="glass"></div>
+    <div id="titlebar"><i></i><i></i><i></i><span id="titlebar-name"></span></div>
+    <div id="speaker"></div>
+    <div id="camera"></div>
+    <div id="homebutton"></div>
+    <div id="buttons"></div>
+  </div>
+
+  <!-- Det, der ligger på skærmen rundt om appen (vindueskoordinater). -->
+  <div id="overlay" hidden>
+    <div id="statusbar">
+      <span id="clock">9:41</span>
+      <span id="sb-icons"></span>
+    </div>
+    <div id="fill-left" class="fill"></div>
+    <div id="fill-right" class="fill"></div>
+    <div id="homebar" class="fill"><i></i></div>
+    <div id="island"></div>
   </div>
 
   <div id="grip" title="Træk for at ændre størrelse"></div>

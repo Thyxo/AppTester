@@ -1,0 +1,98 @@
+/* Fælles skrift og farvetemaer for launcheren og mockup-rammen.
+   Temaet sættes som <html data-theme="…"> af theme.js. */
+
+@font-face { font-family: "Poppins"; font-weight: 400; font-display: swap; src: url("fonts/poppins-400.woff2") format("woff2"); }
+@font-face { font-family: "Poppins"; font-weight: 500; font-display: swap; src: url("fonts/poppins-500.woff2") format("woff2"); }
+@font-face { font-family: "Poppins"; font-weight: 600; font-display: swap; src: url("fonts/poppins-600.woff2") format("woff2"); }
+
+:root {
+  --font: "Poppins", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --radius-xl: 28px;
+  --radius-lg: 20px;
+  --radius-md: 14px;
+}
+
+/* Nat – mørk aubergine med pastelkort (standard). */
+:root,
+:root[data-theme="nat"] {
+  color-scheme: dark;
+  --bg: #131118;
+  --surface: #1e1b25;
+  --surface-2: #2a2633;
+  --text: #f5f3f8;
+  --muted: #918a9e;
+  --border: #2f2a38;
+  --accent: #ff8b80;
+  --on-accent: #1d1214;
+  --c1: #aac8f3; --on-c1: #14121a;
+  --c2: #ff8b80; --on-c2: #1d1214;
+  --c3: #c13ee0; --on-c3: #ffffff;
+  --c4: #d8f7c8; --on-c4: #14121a;
+  --ok: #d8f7c8;
+  --warn: #ffd27a;
+  --danger: #ff8b80;
+  --shadow: 0 18px 40px rgb(0 0 0 / .35);
+}
+
+/* Lys – samme pastelpalet på lys baggrund. */
+:root[data-theme="lys"] {
+  color-scheme: light;
+  --bg: #f3f1f6;
+  --surface: #ffffff;
+  --surface-2: #ebe7f0;
+  --text: #17141d;
+  --muted: #6f6879;
+  --border: #e2dde8;
+  --accent: #c13ee0;
+  --on-accent: #ffffff;
+  --c1: #b9d3f7; --on-c1: #14121a;
+  --c2: #ffa69d; --on-c2: #1d1214;
+  --c3: #c13ee0; --on-c3: #ffffff;
+  --c4: #d3f5c1; --on-c4: #14121a;
+  --ok: #3f9d2a;
+  --warn: #b7791f;
+  --danger: #d6453a;
+  --shadow: 0 18px 40px rgb(40 20 60 / .12);
+}
+
+/* Hav – marineblå med friske accenter. */
+:root[data-theme="hav"] {
+  color-scheme: dark;
+  --bg: #0c1b2d;
+  --surface: #13283f;
+  --surface-2: #1b3552;
+  --text: #eef4fb;
+  --muted: #8aa3bd;
+  --border: #22405f;
+  --accent: #4cc3ff;
+  --on-accent: #06121f;
+  --c1: #9fd8ff; --on-c1: #0c1b2d;
+  --c2: #ffd37a; --on-c2: #2a1d05;
+  --c3: #5eead4; --on-c3: #062a24;
+  --c4: #f9a8d4; --on-c4: #2d0b1d;
+  --ok: #5eead4;
+  --warn: #ffd37a;
+  --danger: #ff8b8b;
+  --shadow: 0 18px 40px rgb(0 0 0 / .4);
+}
+
+/* Grafit – neutral med limegrøn accent. */
+:root[data-theme="grafit"] {
+  color-scheme: dark;
+  --bg: #0f0f10;
+  --surface: #19191b;
+  --surface-2: #242427;
+  --text: #f4f4f5;
+  --muted: #8b8b93;
+  --border: #2a2a2e;
+  --accent: #d9f99d;
+  --on-accent: #0f0f10;
+  --c1: #e4e4e7; --on-c1: #0f0f10;
+  --c2: #a1a1aa; --on-c2: #0f0f10;
+  --c3: #d9f99d; --on-c3: #0f0f10;
+  --c4: #3f3f46; --on-c4: #f4f4f5;
+  --ok: #d9f99d;
+  --warn: #fcd34d;
+  --danger: #fca5a5;
+  --shadow: 0 18px 40px rgb(0 0 0 / .45);
+}

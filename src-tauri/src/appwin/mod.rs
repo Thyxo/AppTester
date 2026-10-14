@@ -55,6 +55,35 @@ pub struct WinCtx {
     window_label: String,
     frame_label: String,
     content_label: String,
+    /// Statuslinjens og bundens farve (appens theme_color/background_color).
+    colors: AppColors,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AppColors {
+    status_bar: String,
+    background: String,
+}
+
+impl AppColors {
+    fn from_meta(meta: Option<&Meta>) -> Self {
+        let valid = |c: &Option<String>| {
+            c.as_deref()
+                .filter(|c| manifest::parse_hex_color(c).is_some())
+                .map(str::to_string)
+        };
+        let background = meta
+            .and_then(|m| valid(&m.background_color))
+            .unwrap_or_else(|| "#ffffff".into());
+        let status_bar = meta
+            .and_then(|m| valid(&m.theme_color))
+            .unwrap_or_else(|| background.clone());
+        Self {
+            status_bar,
+            background,
+        }
+    }
 }
 
 impl WinCtx {
@@ -151,7 +180,15 @@ pub fn open(app: &AppHandle, spec: &AppEntry, meta: Option<&Meta>) -> tauri::Res
         window_label: label.clone(),
         frame_label: format!("frame-{}", spec.id),
         content_label: format!("content-{}", spec.id),
+        colors: AppColors::from_meta(meta),
     });
+    // Registrér før webviews oprettes: rammen spørger efter sit layout, så snart
+    // den er indlæst (før blev den først tegnet ved næste størrelsesændring).
+    app.state::<Windows>()
+        .0
+        .lock()
+        .unwrap()
+        .insert(label.clone(), ctx.clone());
 
     if !MOCKUP {
         return open_plain(app, &ctx, dev, landscape, meta);
@@ -208,12 +245,14 @@ pub fn open(app: &AppHandle, spec: &AppEntry, meta: Option<&Meta>) -> tauri::Res
 
     let content = window.add_child(
         content_builder(app, &ctx, meta)?,
-        LogicalPosition::new(layout.screen.x, layout.screen.y),
-        LogicalSize::new(layout.screen.w, layout.screen.h),
+        LogicalPosition::new(layout.content.x, layout.content.y),
+        LogicalSize::new(layout.content.w, layout.content.h),
     )?;
     let _ = content.set_zoom(layout.scale);
 
-    register(app, &ctx, &window);
+    attach_events(app, &ctx, &window);
+    // Sikr at rammen får layoutet, også hvis den nåede at starte før appen.
+    relayout(app, &ctx, win_w, win_h);
     Ok(())
 }
 
@@ -240,17 +279,11 @@ fn open_plain(
         LogicalSize::new(w, h),
     )?;
     let _ = content.set_zoom(scale);
-    register(app, ctx, &window);
+    attach_events(app, ctx, &window);
     Ok(())
 }
 
-fn register(app: &AppHandle, ctx: &Arc<WinCtx>, window: &Window) {
-    app.state::<Windows>()
-        .0
-        .lock()
-        .unwrap()
-        .insert(ctx.window_label.clone(), ctx.clone());
-
+fn attach_events(app: &AppHandle, ctx: &Arc<WinCtx>, window: &Window) {
     let handle = app.clone();
     let ctx_ev = ctx.clone();
     window.on_window_event(move |event| match event {
@@ -367,8 +400,8 @@ fn relayout(app: &AppHandle, ctx: &WinCtx, win_w: f64, win_h: f64) -> Layout {
         return layout;
     }
     if let Some(content) = ctx.content(app) {
-        let _ = content.set_position(LogicalPosition::new(layout.screen.x, layout.screen.y));
-        let _ = content.set_size(LogicalSize::new(layout.screen.w, layout.screen.h));
+        let _ = content.set_position(LogicalPosition::new(layout.content.x, layout.content.y));
+        let _ = content.set_size(LogicalSize::new(layout.content.w, layout.content.h));
         let _ = content.set_zoom(layout.scale);
     }
     push_to_frame(app, ctx, "layout", &layout);
@@ -478,6 +511,7 @@ pub struct FrameInit {
     deployment: Deployment,
     layout: Layout,
     status: status::Snapshot,
+    colors: AppColors,
 }
 
 #[derive(Serialize)]
@@ -508,6 +542,7 @@ pub fn frame_init(app: &AppHandle, label: &str) -> Option<FrameInit> {
         deployment: ctx.deployment(),
         layout: dev.layout(landscape, w, h),
         status,
+        colors: ctx.colors.clone(),
     })
 }
 

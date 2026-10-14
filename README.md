@@ -47,20 +47,37 @@ efter hinanden (`[...] [...]`) accepteres og ryddes op ved næste ændring.
 
 ## Launcheren
 
-- **Ikoner og farver** hentes fra appens web manifest og caches, så griddet ser
-  ens ud offline. **↻** henter igen.
+- **Temaer**: Nat (standard), Lys, Hav og Grafit – skift med palet-knappen eller under
+  **⚙ Indstillinger**. Valget gælder også mockup-rammen.
+- **Fliserne** øverst filtrerer: Alle, Favoritter, Senest åbnet – og **+ Tilføj app**.
+- **Ikoner og farver** hentes fra appens web manifest og caches, så det hele ser ens
+  ud offline. **↻** henter igen.
 - **Søg**: `/` eller `Ctrl+F`, `Enter` åbner første app, `Esc` rydder.
-- **Sortering**: navn eller senest åbnet. **☆** gør en app til favorit.
+- **☆** gør en app til favorit (vises først), **✕** fjerner den fra listen.
 
 ## App-vinduet: enheds-mockup
 
-Hver app åbner i en telefonramme (iPhone 15 som standard) uden Windows-ramme:
+Hver app åbner i en realistisk enhed (iPhone 15 Pro som standard) uden Windows-ramme:
+titaniumkant, sideknapper, Dynamic Island, statuslinje med klokkeslæt og
+hjem-indikator. Statuslinjen og bunden farves med appens `theme_color` og
+`background_color`, ligesom når appen er installeret på telefonen.
 
-- **Forholdet er låst.** Vinduet kan ikke blive større end enhedens 100 %-størrelse.
-  Gør du det mindre (grebet nederst til højre), skaleres hele telefonen ned – appen
-  ser stadig præcis enhedens viewport (fx 393×852), bare zoomet.
-- **Flyt** vinduet ved at trække i værktøjslinjen eller telefonens ramme.
-- Vinduet husker størrelse, placering og valgt enhed pr. app.
+- **Forholdet er låst** og vinduet kan ikke blive større end 100 %. Gør du det mindre
+  (grebet nederst til højre), skaleres hele enheden – appen ser stadig samme viewport.
+- **Flyt** vinduet ved at trække i værktøjslinjen eller kabinettet.
+- Husker størrelse, placering og enhed pr. app.
+
+| Enhed | Skærm | Appens viewport (portræt) |
+|---|---|---|
+| iPhone 15 Pro | 393×852 | 393×759 (minus statuslinje 59 og hjem-indikator 34) |
+| iPhone 15 Pro Max | 430×932 | 430×839 |
+| iPhone SE | 375×667 | 375×647 (minus statuslinje 20) |
+| Pixel 8 | 412×915 | 412×867 (minus statuslinje og navigationslinje 24+24) |
+| iPad Air | 820×1180 | 820×1136 |
+| Desktop | 1280×800 | 1280×800 |
+
+Viewporten svarer til en installeret PWA (standalone). Holder du musen over
+enhedsvælgeren, står den aktuelle viewport. User-agent og touch ændres ikke.
 
 **Værktøjslinjen**
 
@@ -72,11 +89,9 @@ Hver app åbner i en telefonramme (iPhone 15 som standard) uden Windows-ramme:
 | ⚡ | Hard reload: afregistrerer service workers og tømmer Cache Storage |
 | 🗑 | Ryd alle data for appen (med bekræftelse) |
 | `<>` | DevTools for appen |
-| Enhed | iPhone 15 (393×852) · iPhone SE (375×667) · Pixel 8 (412×915) · iPad (820×1180) · Desktop (1280×800) |
+| Enhed | Vælg enhed |
 | ⟲ | Vend (portræt/landskab) |
 | ↗ | Åbn i standardbrowser |
-
-User-agent og touch ændres ikke – kun viewport-størrelsen.
 
 På **Linux** kan Tauri ikke placere to webviews frit i samme vindue; dér åbnes appen
 i et almindeligt vindue med enhedens viewport, uden ramme og værktøjslinje.
@@ -120,7 +135,9 @@ AppTester/
 │  ├─ index.html
 │  ├─ styles.css
 │  ├─ main.js                    grid, søg, tilføj/fjern, favoritter
-│  └─ frame.{html,css,js}        telefonramme + værktøjslinje i app-vinduet
+│  ├─ frame.{html,css,js}        enheds-mockup + værktøjslinje i app-vinduet
+│  ├─ theme.{css,js}             farvetemaer (deles af launcher og mockup)
+│  └─ fonts/                     Poppins (SIL Open Font License)
 └─ src-tauri/
    ├─ Cargo.toml
    ├─ tauri.conf.json

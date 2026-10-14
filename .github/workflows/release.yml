@@ -1,6 +1,7 @@
 name: Release
 
-# Kør ved et versions-tag, fx: git tag v0.1.0 && git push origin v0.1.0
+# Kør manuelt (Actions → Release → Run workflow) eller ved et versions-tag.
+# Tagget v<version> oprettes ud fra "version" i src-tauri/tauri.conf.json.
 on:
   push:
     tags: ["v*"]
@@ -24,10 +25,16 @@ jobs:
         run: cargo test
       - name: Byg installer (.msi + .exe)
         run: npx --yes @tauri-apps/cli@2 build --bundles msi,nsis
+      - name: Læs version
+        id: version
+        shell: bash
+        run: echo "tag=v$(node -p "require('./src-tauri/tauri.conf.json').version")" >> "$GITHUB_OUTPUT"
       - name: Opret GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: PWA Launcher ${{ github.ref_name }}
+          tag_name: ${{ steps.version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: PWA Launcher ${{ steps.version.outputs.tag }}
           draft: false
           prerelease: false
           body: |

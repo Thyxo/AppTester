@@ -1,0 +1,43 @@
+name: Release
+
+# Kør ved et versions-tag, fx: git tag v0.1.0 && git push origin v0.1.0
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Windows-installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Tests
+        working-directory: src-tauri
+        run: cargo test
+      - name: Byg installer (.msi + .exe)
+        run: npx --yes @tauri-apps/cli@2 build --bundles msi,nsis
+      - name: Opret GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: PWA Launcher ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          body: |
+            **Installation på Windows**
+            1. Hent `PWA.Launcher_..._x64-setup.exe` herunder og dobbeltklik.
+            2. Windows SmartScreen advarer, fordi installeren ikke er kodesigneret:
+               klik **Flere oplysninger → Kør alligevel**.
+            3. Start **PWA Launcher** fra Start-menuen, klik **✎ Apps** og tilføj dine apps.
+
+            `.msi`-filen er et alternativ til `.exe`, fx til installation for alle brugere.
+          files: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/msi/*.msi

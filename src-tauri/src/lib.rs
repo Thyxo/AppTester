@@ -101,11 +101,13 @@ fn set_bypass_token(apps: State<AppsFile>, id: String, token: String) -> Result<
     Ok(secrets::bypass_token(&id).is_some())
 }
 
+/// Skal være `async`: på Windows går WebView2 i baglås, hvis et vindue
+/// oprettes fra en synkron kommando (den kører på hovedtråden).
 #[tauri::command]
-fn open_app(
+async fn open_app(
     app: AppHandle,
-    apps: State<AppsFile>,
-    store: State<Store>,
+    apps: State<'_, AppsFile>,
+    store: State<'_, Store>,
     id: String,
 ) -> Result<(), String> {
     let entry = apps.find(&id)?;

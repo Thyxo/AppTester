@@ -69,15 +69,19 @@ hjem-indikator. Statuslinjen og bunden farves med appens `theme_color` og
 
 | Enhed | Skærm | Appens viewport (portræt) |
 |---|---|---|
-| iPhone 15 Pro | 393×852 | 393×759 (minus statuslinje 59 og hjem-indikator 34) |
-| iPhone 15 Pro Max | 430×932 | 430×839 |
+| iPhone 15 Pro | 393×852 | 393×793 på Windows (minus statuslinje 59) · 393×759 på macOS |
+| iPhone 15 Pro Max | 430×932 | 430×873 på Windows · 430×839 på macOS |
 | iPhone SE | 375×667 | 375×647 (minus statuslinje 20) |
 | Pixel 8 | 412×915 | 412×867 (minus statuslinje og navigationslinje 24+24) |
 | iPad Air | 820×1180 | 820×1136 |
 | Desktop | 1280×800 | 1280×800 |
 
-Viewporten svarer til en installeret PWA (standalone). Holder du musen over
-enhedsvælgeren, står den aktuelle viewport. User-agent og touch ændres ikke.
+Viewporten svarer til en installeret PWA (standalone): appen starter under
+statuslinjen og går helt til bund. På Windows klippes appens webview med en
+vinduesregion (runde hjørner + hul til hjem-indikatoren), så indikatoren ligger
+oven på appen som på telefonen. På macOS reserveres plads til indikatoren i stedet.
+Holder du musen over enhedsvælgeren, står den aktuelle viewport. User-agent og
+touch ændres ikke.
 
 **Værktøjslinjen**
 
@@ -153,6 +157,7 @@ AppTester/
       └─ appwin/
          ├─ mod.rs               mockup-vindue, data-mappe, link-politik, deployment
          ├─ device.rs            enheder + layout-matematik (skala, ramme, skærm)
+         ├─ clip.rs              Windows: runde hjørner + hul til hjem-indikatoren
          ├─ actions.rs           værktøjslinjens handlinger
          └─ status.rs            SW-/offline-status
 ```

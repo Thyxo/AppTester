@@ -4,9 +4,11 @@
 //! skaleres med vinduet (højst 100 %), og appens webview lægges præcis over
 //! skærmens indholdsområde med zoom = skala, så appen altid ser enhedens viewport.
 //!
-//! Indholdsområdet er skærmen minus statuslinje og hjem-indikator – som for en
-//! installeret PWA på telefonen. Det holder også appens firkantede hjørner væk
-//! fra skærmens runde hjørner.
+//! Indholdsområdet er skærmen minus statuslinjen – som for en installeret PWA.
+//! Kan appens webview klippes (`overlay`, Windows), går appen helt til bund med
+//! runde hjørner, og hjem-indikatoren tegnes oven på den (som på telefonen).
+//! Ellers reserveres plads til indikatoren, så appens firkantede hjørner holdes
+//! væk fra skærmens runde hjørner.
 
 use serde::Serialize;
 
@@ -85,6 +87,9 @@ pub struct Device {
     /// Statuslinje/hjem-indikator m.m., som appen ikke tegner i.
     pub portrait: Insets,
     pub landscape: Insets,
+    /// iPhone-hjem-indikator (bredde, højde, afstand til bund). Med `overlay`
+    /// tegnes den oven på appen i stedet for at tage plads fra den.
+    pub home_indicator: Option<(f64, f64, f64)>,
     pub can_rotate: bool,
 }
 
@@ -104,6 +109,7 @@ pub const DEVICES: &[Device] = &[
         notch: Notch::Island,
         portrait: Insets::new(59.0, 0.0, 34.0, 0.0),
         landscape: Insets::new(0.0, 59.0, 21.0, 59.0),
+        home_indicator: Some((134.0, 5.0, 8.0)),
         can_rotate: true,
     },
     Device {
@@ -121,6 +127,7 @@ pub const DEVICES: &[Device] = &[
         notch: Notch::Island,
         portrait: Insets::new(59.0, 0.0, 34.0, 0.0),
         landscape: Insets::new(0.0, 59.0, 21.0, 59.0),
+        home_indicator: Some((134.0, 5.0, 8.0)),
         can_rotate: true,
     },
     Device {
@@ -138,6 +145,7 @@ pub const DEVICES: &[Device] = &[
         notch: Notch::HomeButton,
         portrait: Insets::new(20.0, 0.0, 0.0, 0.0),
         landscape: Insets::new(0.0, 0.0, 0.0, 0.0),
+        home_indicator: None,
         can_rotate: true,
     },
     Device {
@@ -155,6 +163,7 @@ pub const DEVICES: &[Device] = &[
         notch: Notch::Punch,
         portrait: Insets::new(24.0, 0.0, 24.0, 0.0),
         landscape: Insets::new(24.0, 0.0, 24.0, 24.0),
+        home_indicator: None,
         can_rotate: true,
     },
     Device {
@@ -172,6 +181,7 @@ pub const DEVICES: &[Device] = &[
         notch: Notch::Camera,
         portrait: Insets::new(24.0, 0.0, 20.0, 0.0),
         landscape: Insets::new(24.0, 0.0, 20.0, 0.0),
+        home_indicator: None,
         can_rotate: true,
     },
     Device {
@@ -189,6 +199,7 @@ pub const DEVICES: &[Device] = &[
         notch: Notch::None,
         portrait: Insets::new(0.0, 0.0, 0.0, 0.0),
         landscape: Insets::new(0.0, 0.0, 0.0, 0.0),
+        home_indicator: None,
         can_rotate: false,
     },
 ];
@@ -223,6 +234,10 @@ pub struct Layout {
     pub insets: Insets,
     pub radius: f64,
     pub screen_radius: f64,
+    /// Radius på appens nederste hjørner (klippes på Windows), 0 = firkantet.
+    pub content_radius: f64,
+    /// Hjem-indikatoren oven på appen (kun med `overlay`).
+    pub indicator: Option<Rect>,
     pub rim: f64,
     pub notch: Notch,
     /// Viewport i CSS-pixels, som appen ser.
@@ -258,17 +273,21 @@ impl Device {
         }
     }
 
-    pub fn insets(&self, landscape: bool) -> Insets {
-        if landscape {
+    pub fn insets(&self, landscape: bool, overlay: bool) -> Insets {
+        let mut i = if landscape {
             self.landscape
         } else {
             self.portrait
+        };
+        if overlay && self.home_indicator.is_some() {
+            i.bottom = 0.0;
         }
+        i
     }
 
-    pub fn viewport(&self, landscape: bool) -> (f64, f64) {
+    pub fn viewport(&self, landscape: bool, overlay: bool) -> (f64, f64) {
         let (w, h) = self.screen_size(landscape);
-        let i = self.insets(landscape);
+        let i = self.insets(landscape, overlay);
         (w - i.left - i.right, h - i.top - i.bottom)
     }
 
@@ -297,7 +316,8 @@ impl Device {
     }
 
     /// Placering af enhed, skærm og app i et vindue af størrelsen `win_w` × `win_h`.
-    pub fn layout(&self, landscape: bool, win_w: f64, win_h: f64) -> Layout {
+    /// `overlay`: appens webview kan klippes, så hjem-indikatoren ligger ovenpå.
+    pub fn layout(&self, landscape: bool, win_w: f64, win_h: f64, overlay: bool) -> Layout {
         let (fw, fh) = self.frame_size(landscape);
         let avail_w = (win_w - 2.0 * PAD).max(1.0);
         let avail_h = (win_h - TOOLBAR - PAD).max(1.0);
@@ -317,13 +337,30 @@ impl Device {
             w: (sw * scale).round(),
             h: (sh * scale).round(),
         };
-        let insets = self.insets(landscape);
-        let (vw, vh) = self.viewport(landscape);
+        let insets = self.insets(landscape, overlay);
+        let (vw, vh) = self.viewport(landscape, overlay);
         let content = Rect {
             x: (screen.x + insets.left * scale).round(),
             y: (screen.y + insets.top * scale).round(),
             w: (vw * scale).round(),
             h: (vh * scale).round(),
+        };
+        // Går appen helt ud i et af skærmens runde hjørner, skal den rundes.
+        let r = self.screen_radius;
+        let reaches_corner = insets.bottom < r && (insets.left < r || insets.right < r);
+        let content_radius = if overlay && reaches_corner {
+            r * scale
+        } else {
+            0.0
+        };
+        let indicator = match (overlay, self.home_indicator) {
+            (true, Some((iw, ih, gap))) => Some(Rect {
+                x: (screen.x + (screen.w - iw * scale) / 2.0).round(),
+                y: (screen.y + screen.h - (gap + ih) * scale).round(),
+                w: (iw * scale).round(),
+                h: (ih * scale).round().max(2.0),
+            }),
+            _ => None,
         };
         Layout {
             device: self.id,
@@ -336,6 +373,8 @@ impl Device {
             insets: insets.scaled(scale),
             radius: self.radius * scale,
             screen_radius: self.screen_radius * scale,
+            content_radius,
+            indicator,
             rim: self.rim * scale,
             notch: self.notch,
             viewport: (vw, vh),
@@ -362,20 +401,50 @@ mod tests {
     fn full_size_window_gives_scale_one() {
         let d = iphone();
         let (w, h) = d.window_size(false, 1.0);
-        let l = d.layout(false, w, h);
+        let l = d.layout(false, w, h, false);
         assert!((l.scale - 1.0).abs() < 1e-9);
         assert_eq!((l.screen.w, l.screen.h), (393.0, 852.0));
         // Uden statuslinje (59) og hjem-indikator (34).
         assert_eq!(l.viewport, (393.0, 759.0));
         assert_eq!((l.content.w, l.content.h), (393.0, 759.0));
         assert!(inside(l.content, l.screen) && inside(l.screen, l.phone));
+        assert_eq!(l.content_radius, 0.0);
+        assert!(l.indicator.is_none());
+    }
+
+    /// Med overlay (Windows) går appen helt til bund som på telefonen:
+    /// runde nederste hjørner, og indikatoren ligger ovenpå.
+    #[test]
+    fn overlay_reaches_bottom_with_rounded_corners() {
+        let d = iphone();
+        let (w, h) = d.window_size(false, 1.0);
+        let l = d.layout(false, w, h, true);
+        assert_eq!(l.viewport, (393.0, 793.0));
+        assert_eq!(l.content.y + l.content.h, l.screen.y + l.screen.h);
+        assert_eq!(l.content_radius, 47.0);
+        let ind = l.indicator.expect("indikator");
+        assert!(inside(ind, l.content));
+        assert_eq!((ind.w, ind.h), (134.0, 5.0));
+        assert_eq!(ind.y + ind.h + 8.0, l.screen.y + l.screen.h);
+
+        // Landskab: appen starter efter øen (59 > 47), så ingen afrunding.
+        let (w, h) = d.window_size(true, 1.0);
+        let l = d.layout(true, w, h, true);
+        assert_eq!(l.viewport, (734.0, 393.0));
+        assert_eq!(l.content_radius, 0.0);
+        assert!(l.indicator.is_some());
+
+        // Enheder uden iPhone-indikator er uændrede.
+        let se = &DEVICES[index_of("iphone-se")];
+        let (w, h) = se.window_size(false, 1.0);
+        assert_eq!(se.layout(false, w, h, true).viewport, (375.0, 647.0));
     }
 
     #[test]
     fn half_size_keeps_viewport_and_ratio() {
         let d = iphone();
         let (w, h) = d.window_size(false, 0.5);
-        let l = d.layout(false, w, h);
+        let l = d.layout(false, w, h, false);
         assert!((l.scale - 0.5).abs() < 0.01);
         // Appen ser stadig samme viewport – den er bare zoomet ned.
         assert!((l.content.w / l.scale - 393.0).abs() < 2.0);
@@ -386,7 +455,7 @@ mod tests {
     fn too_wide_window_is_letterboxed_not_stretched() {
         let d = iphone();
         let (_, h) = d.window_size(false, 0.6);
-        let l = d.layout(false, 2000.0, h);
+        let l = d.layout(false, 2000.0, h, false);
         assert!((l.scale - 0.6).abs() < 0.01);
         let (fw, fh) = d.frame_size(false);
         assert!((l.phone.w / l.phone.h - fw / fh).abs() < 0.01);
@@ -394,7 +463,7 @@ mod tests {
 
     #[test]
     fn never_larger_than_full_size() {
-        let l = iphone().layout(false, 5000.0, 5000.0);
+        let l = iphone().layout(false, 5000.0, 5000.0, true);
         assert_eq!(l.scale, 1.0);
     }
 
@@ -402,19 +471,20 @@ mod tests {
     fn landscape_uses_landscape_insets() {
         let d = iphone();
         let (w, h) = d.window_size(true, 1.0);
-        let l = d.layout(true, w, h);
+        let l = d.layout(true, w, h, false);
         assert_eq!((l.screen.w, l.screen.h), (852.0, 393.0));
         assert_eq!(l.viewport, (852.0 - 118.0, 393.0 - 21.0));
         assert!(inside(l.content, l.screen));
     }
 
-    /// Appens firkantede hjørner må højst stikke ~2 pt ud over skærmens runde hjørner.
+    /// Appens firkantede hjørner må højst stikke ~2 pt ud over skærmens runde hjørner
+    /// (uden overlay; med overlay klippes hjørnerne).
     #[test]
     fn content_corners_stay_inside_rounded_screen() {
         for d in DEVICES {
             for landscape in [false, true] {
                 let (sw, sh) = d.screen_size(landscape);
-                let i = d.insets(landscape);
+                let i = d.insets(landscape, false);
                 let r = d.screen_radius;
                 // Hjørnerne af indholdsområdet, målt fra skærmens hjørner.
                 for (dx, dy) in [

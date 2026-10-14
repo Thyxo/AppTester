@@ -6,6 +6,7 @@
 //!   sin egen vedvarende data-mappe og ingen adgang til launcherens kommandoer.
 
 pub mod actions;
+mod clip;
 pub mod device;
 mod status;
 
@@ -224,7 +225,7 @@ pub fn open(app: &AppHandle, spec: &AppEntry, meta: Option<&Meta>) -> tauri::Res
     };
     let window = wb.build()?;
 
-    let layout = dev.layout(landscape, win_w, win_h);
+    let layout = dev.layout(landscape, win_w, win_h, clip::SUPPORTED);
 
     // Rammen først (nederst) – appen lægges ovenpå.
     let frame_url = WebviewUrl::App(format!("frame.html?label={label}").into());
@@ -266,7 +267,7 @@ fn open_plain(
 ) -> tauri::Result<()> {
     let (sw, sh) = primary_screen(app);
     let scale = dev.fit_scale(landscape, sw, sh);
-    let (vw, vh) = dev.viewport(landscape);
+    let (vw, vh) = dev.viewport(landscape, false);
     let (w, h) = (vw * scale, vh * scale);
     let window = WindowBuilder::new(app, &ctx.window_label)
         .title(&ctx.entry.name)
@@ -391,7 +392,7 @@ fn content_builder(
 /// Lægger appens webview over skærmen og fortæller rammen om det nye layout.
 fn relayout(app: &AppHandle, ctx: &WinCtx, win_w: f64, win_h: f64) -> Layout {
     let (dev, landscape) = ctx.device();
-    let layout = dev.layout(landscape, win_w, win_h);
+    let layout = dev.layout(landscape, win_w, win_h, clip::SUPPORTED);
     if !MOCKUP {
         // Appen fylder vinduet (auto_resize); hold viewport-bredden.
         if let Some(content) = ctx.content(app) {
@@ -403,6 +404,11 @@ fn relayout(app: &AppHandle, ctx: &WinCtx, win_w: f64, win_h: f64) -> Layout {
         let _ = content.set_position(LogicalPosition::new(layout.content.x, layout.content.y));
         let _ = content.set_size(LogicalSize::new(layout.content.w, layout.content.h));
         let _ = content.set_zoom(layout.scale);
+        let scale_factor = ctx
+            .window(app)
+            .and_then(|w| w.scale_factor().ok())
+            .unwrap_or(1.0);
+        clip::apply(&content, &layout, scale_factor);
     }
     push_to_frame(app, ctx, "layout", &layout);
     layout
@@ -430,7 +436,7 @@ fn snap_when_idle(app: &AppHandle, ctx: &Arc<WinCtx>) {
             return;
         };
         let (dev, landscape) = ctx.device();
-        let layout = dev.layout(landscape, w, h);
+        let layout = dev.layout(landscape, w, h, clip::SUPPORTED);
         let (tw, th) = dev.window_size(landscape, layout.scale);
         if (tw - w).abs() > 1.5 || (th - h).abs() > 1.5 {
             let _ = win.set_size(LogicalSize::new(tw, th));
@@ -444,7 +450,7 @@ fn set_device(app: &AppHandle, ctx: &Arc<WinCtx>, idx: usize, landscape: bool) {
     let old_scale = logical_inner_size(&win)
         .map(|(w, h)| {
             let (d, l) = ctx.device();
-            d.layout(l, w, h).scale
+            d.layout(l, w, h, clip::SUPPORTED).scale
         })
         .unwrap_or(1.0);
 
@@ -540,7 +546,7 @@ pub fn frame_init(app: &AppHandle, label: &str) -> Option<FrameInit> {
             .collect(),
         has_preview: ctx.entry.preview.is_some(),
         deployment: ctx.deployment(),
-        layout: dev.layout(landscape, w, h),
+        layout: dev.layout(landscape, w, h, clip::SUPPORTED),
         status,
         colors: ctx.colors.clone(),
     })

@@ -195,6 +195,14 @@ function renderOverlay(l) {
     pill.style.opacity = ".85";
   }
 
+  // Hjem-indikator oven på appen (Windows: appens webview har et hul her).
+  const ind = $("indicator");
+  ind.style.display = l.indicator ? "block" : "none";
+  if (l.indicator) {
+    place(ind, l.indicator.x, l.indicator.y, l.indicator.w, l.indicator.h);
+    ind.style.background = contrastOn(c.background);
+  }
+
   // Dynamic Island / hulkamera.
   const island = $("island");
   island.className = "";

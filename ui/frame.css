@@ -171,6 +171,7 @@ select option { background: var(--surface); color: var(--text); }
 .fill { display: none; }
 #homebar { display: none; place-items: center; }
 #homebar i { display: block; border-radius: 999px; }
+#indicator { display: none; border-radius: 999px; }
 #island { display: none; background: #000; border-radius: 999px; }
 #island.punch { border-radius: 50%; background: radial-gradient(circle at 35% 35%, #2a3447, #000 60%); }
 

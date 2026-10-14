@@ -1,40 +1,44 @@
-//! App-vinduer: ét Tauri-vindue pr. webapp med egen, vedvarende data-mappe.
+//! App-vinduer som enheds-mockups.
+//!
+//! Hvert app-vindue er gennemsigtigt og uden systemramme og indeholder to webviews:
+//! - `frame-<id>`: lokal side (ui/frame.html), der tegner telefonen og værktøjslinjen.
+//! - `content-<id>`: selve webappen, lagt præcis over telefonens skærm. Den har
+//!   sin egen vedvarende data-mappe og ingen adgang til launcherens kommandoer.
 
-pub mod menu;
+pub mod actions;
+pub mod device;
 mod status;
-mod viewport;
 
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
 
-use tauri::webview::{Color, NewWindowResponse, PageLoadEvent};
+use serde::Serialize;
+use tauri::webview::{Color, NewWindowResponse, PageLoadEvent, WebviewBuilder};
+use tauri::window::WindowBuilder;
 use tauri::{
-    AppHandle, Manager, Theme, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
+    AppHandle, LogicalPosition, LogicalSize, Manager, Url, Webview, WebviewUrl, Window, WindowEvent,
 };
 use tauri_plugin_opener::OpenerExt;
 
 use crate::apps::AppEntry;
 use crate::manifest::{self, Meta};
 use crate::secrets;
-use crate::store::{Store, WindowGeom};
+use crate::store::{DeviceChoice, Store, WindowGeom};
+use device::{Layout, DEVICES};
 
-/// Standardstørrelse: en telefon på højkant.
-const DEFAULT_SIZE: (f64, f64) = (430.0, 900.0);
+/// Mockup med ramme og værktøjslinje kræver frit placerbare børne-webviews.
+/// Det understøtter Tauri på Windows og macOS; på Linux stables de i en GTK-box,
+/// så dér åbnes appen i et almindeligt vindue med enhedens viewport.
+const MOCKUP: bool = cfg!(not(target_os = "linux"));
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Deployment {
     Production,
     Preview,
-}
-
-impl Deployment {
-    fn label(self) -> &'static str {
-        match self {
-            Deployment::Production => "production",
-            Deployment::Preview => "preview",
-        }
-    }
 }
 
 /// Tilstand for ét åbent app-vindue.
@@ -42,12 +46,25 @@ pub struct WinCtx {
     entry: AppEntry,
     nav: NavPolicy,
     deployment: Mutex<Deployment>,
-    title: Mutex<String>,
+    /// (indeks i DEVICES, landskab)
+    device: Mutex<(usize, bool)>,
+    /// Seneste status fra siden (til værktøjslinjen og vinduestitlen).
+    status: Mutex<status::Snapshot>,
+    /// Tæller til at finde ud af, hvornår brugeren er færdig med at trække i vinduet.
+    resize_gen: AtomicU64,
+    window_label: String,
+    frame_label: String,
+    content_label: String,
 }
 
 impl WinCtx {
     fn deployment(&self) -> Deployment {
         *self.deployment.lock().unwrap()
+    }
+
+    fn device(&self) -> (&'static device::Device, bool) {
+        let (i, landscape) = *self.device.lock().unwrap();
+        (&DEVICES[i], landscape)
     }
 
     /// Start-URL for den valgte deployment. Previews får Vercels bypass-token på,
@@ -59,6 +76,26 @@ impl WinCtx {
             }
             _ => self.entry.url.clone(),
         }
+    }
+
+    /// Adressen uden bypass-token (til "åbn i browser").
+    fn public_url(&self) -> Url {
+        match (self.deployment(), &self.entry.preview) {
+            (Deployment::Preview, Some(preview)) => preview.clone(),
+            _ => self.entry.url.clone(),
+        }
+    }
+
+    fn content(&self, app: &AppHandle) -> Option<Webview> {
+        app.get_webview(&self.content_label)
+    }
+
+    fn frame(&self, app: &AppHandle) -> Option<Webview> {
+        app.get_webview(&self.frame_label)
+    }
+
+    fn window(&self, app: &AppHandle) -> Option<Window> {
+        app.get_window(&self.window_label)
     }
 }
 
@@ -77,19 +114,30 @@ fn with_bypass(url: &Url, token: Option<String>) -> Url {
 pub struct Windows(Mutex<HashMap<String, Arc<WinCtx>>>);
 
 impl Windows {
-    fn get(&self, label: &str) -> Option<Arc<WinCtx>> {
+    pub fn get(&self, label: &str) -> Option<Arc<WinCtx>> {
         self.0.lock().unwrap().get(label).cloned()
     }
 }
 
-/// Åbner appen i sit eget vindue, eller fokuserer det, hvis det allerede er åbent.
-pub fn open(app: &AppHandle, spec: &AppEntry, meta: Option<&Meta>) -> tauri::Result<WebviewWindow> {
+/// Åbner appen i sit eget mockup-vindue, eller fokuserer det, hvis det er åbent.
+///
+/// Må ikke kaldes på hovedtråden (`add_child` venter på den) – kald den fra en
+/// async kommando.
+pub fn open(app: &AppHandle, spec: &AppEntry, meta: Option<&Meta>) -> tauri::Result<()> {
     let label = format!("app-{}", spec.id);
-    if let Some(win) = app.get_webview_window(&label) {
+    if let Some(win) = app.get_window(&label) {
         win.unminimize()?;
+        win.show()?;
         win.set_focus()?;
-        return Ok(win);
+        return Ok(());
     }
+
+    let store = app.state::<Store>();
+    let choice = store.read(|s| s.devices.get(&spec.id).cloned());
+    let (dev_idx, landscape) = choice
+        .map(|c| (device::index_of(&c.device), c.landscape))
+        .unwrap_or((0, false));
+    let dev = &DEVICES[dev_idx];
 
     let mut allowed = vec![&spec.url];
     allowed.extend(spec.preview.as_ref());
@@ -97,12 +145,155 @@ pub fn open(app: &AppHandle, spec: &AppEntry, meta: Option<&Meta>) -> tauri::Res
         entry: spec.clone(),
         nav: NavPolicy::new(&allowed),
         deployment: Mutex::new(Deployment::Production),
-        title: Mutex::new(String::new()),
+        device: Mutex::new((dev_idx, landscape)),
+        status: Mutex::new(status::Snapshot::default()),
+        resize_gen: AtomicU64::new(0),
+        window_label: label.clone(),
+        frame_label: format!("frame-{}", spec.id),
+        content_label: format!("content-{}", spec.id),
     });
 
-    let mut builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(ctx.start_url()))
-        .title(status::base_title(&ctx))
-        .min_inner_size(240.0, 320.0)
+    if !MOCKUP {
+        return open_plain(app, &ctx, dev, landscape, meta);
+    }
+
+    // Størrelse: husket (hvis den stadig er på en skærm) eller så stor som skærmen tillader.
+    let saved = store
+        .read(|s| s.windows.get(&spec.id).copied())
+        .filter(|g| on_some_monitor(app, g));
+    let (min, max) = dev.size_limits(landscape);
+    let (win_w, win_h) = match saved {
+        Some(g) => (g.width.clamp(min.0, max.0), g.height.clamp(min.1, max.1)),
+        None => {
+            let (sw, sh) = primary_screen(app);
+            dev.window_size(landscape, dev.fit_scale(landscape, sw, sh))
+        }
+    };
+
+    let mut wb = WindowBuilder::new(app, &label)
+        .title(&spec.name)
+        .decorations(false)
+        .resizable(true)
+        .inner_size(win_w, win_h)
+        .min_inner_size(min.0, min.1)
+        .max_inner_size(max.0, max.1);
+    #[cfg(not(target_os = "macos"))]
+    {
+        wb = wb.transparent(true).shadow(false);
+    }
+    wb = match saved {
+        Some(g) => wb.position(g.x, g.y),
+        None => wb.center(),
+    };
+    let window = wb.build()?;
+
+    let layout = dev.layout(landscape, win_w, win_h);
+
+    // Rammen først (nederst) – appen lægges ovenpå.
+    let frame_url = WebviewUrl::App(format!("frame.html?label={label}").into());
+    let mut frame = WebviewBuilder::new(&ctx.frame_label, frame_url).auto_resize();
+    #[cfg(not(target_os = "macos"))]
+    {
+        frame = frame.transparent(true);
+    }
+    #[cfg(target_os = "macos")]
+    {
+        frame = frame.background_color(Color(24, 24, 27, 255));
+    }
+    window.add_child(
+        frame,
+        LogicalPosition::new(0.0, 0.0),
+        LogicalSize::new(win_w, win_h),
+    )?;
+
+    let content = window.add_child(
+        content_builder(app, &ctx, meta)?,
+        LogicalPosition::new(layout.screen.x, layout.screen.y),
+        LogicalSize::new(layout.screen.w, layout.screen.h),
+    )?;
+    let _ = content.set_zoom(layout.scale);
+
+    register(app, &ctx, &window);
+    Ok(())
+}
+
+/// Linux: almindeligt vindue med kun appen, i enhedens viewport (zoomet til skærmen).
+fn open_plain(
+    app: &AppHandle,
+    ctx: &Arc<WinCtx>,
+    dev: &device::Device,
+    landscape: bool,
+    meta: Option<&Meta>,
+) -> tauri::Result<()> {
+    let (sw, sh) = primary_screen(app);
+    let scale = dev.fit_scale(landscape, sw, sh);
+    let (vw, vh) = dev.viewport(landscape);
+    let (w, h) = (vw * scale, vh * scale);
+    let window = WindowBuilder::new(app, &ctx.window_label)
+        .title(&ctx.entry.name)
+        .inner_size(w, h)
+        .center()
+        .build()?;
+    let content = window.add_child(
+        content_builder(app, ctx, meta)?.auto_resize(),
+        LogicalPosition::new(0.0, 0.0),
+        LogicalSize::new(w, h),
+    )?;
+    let _ = content.set_zoom(scale);
+    register(app, ctx, &window);
+    Ok(())
+}
+
+fn register(app: &AppHandle, ctx: &Arc<WinCtx>, window: &Window) {
+    app.state::<Windows>()
+        .0
+        .lock()
+        .unwrap()
+        .insert(ctx.window_label.clone(), ctx.clone());
+
+    let handle = app.clone();
+    let ctx_ev = ctx.clone();
+    window.on_window_event(move |event| match event {
+        WindowEvent::Resized(size) => {
+            let Some(win) = ctx_ev.window(&handle) else {
+                return;
+            };
+            let scale = win.scale_factor().unwrap_or(1.0);
+            let size = size.to_logical::<f64>(scale);
+            relayout(&handle, &ctx_ev, size.width, size.height);
+            snap_when_idle(&handle, &ctx_ev);
+        }
+        WindowEvent::ScaleFactorChanged { .. } => {
+            if let Some((w, h)) = ctx_ev.window(&handle).and_then(|w| logical_inner_size(&w)) {
+                relayout(&handle, &ctx_ev, w, h);
+            }
+        }
+        WindowEvent::CloseRequested { .. } => {
+            if let Some(win) = ctx_ev.window(&handle) {
+                save_geometry(&handle, &ctx_ev, &win);
+            }
+        }
+        WindowEvent::Destroyed => {
+            handle
+                .state::<Windows>()
+                .0
+                .lock()
+                .unwrap()
+                .remove(&ctx_ev.window_label);
+        }
+        _ => {}
+    });
+
+    status::spawn_poller(app.clone(), ctx.window_label.clone());
+}
+
+fn content_builder(
+    app: &AppHandle,
+    ctx: &Arc<WinCtx>,
+    meta: Option<&Meta>,
+) -> tauri::Result<WebviewBuilder<tauri::Wry>> {
+    let mut b = WebviewBuilder::new(&ctx.content_label, WebviewUrl::External(ctx.start_url()))
+        .zoom_hotkeys_enabled(false)
         .on_navigation({
             let ctx = ctx.clone();
             let app = app.clone();
@@ -119,11 +310,10 @@ pub fn open(app: &AppHandle, spec: &AppEntry, meta: Option<&Meta>) -> tauri::Res
             // target="_blank" / window.open: samme app → samme vindue, ellers browseren.
             let ctx = ctx.clone();
             let app = app.clone();
-            let label = label.clone();
             move |url, _features| {
                 if ctx.nav.allows(&url) {
-                    if let Some(win) = app.get_webview_window(&label) {
-                        let _ = win.navigate(url);
+                    if let Some(content) = ctx.content(&app) {
+                        let _ = content.navigate(url);
                     }
                 } else {
                     open_external(&app, &url);
@@ -133,130 +323,239 @@ pub fn open(app: &AppHandle, spec: &AppEntry, meta: Option<&Meta>) -> tauri::Res
         })
         .on_page_load({
             let ctx = ctx.clone();
-            move |_win, payload| {
+            move |_webview, payload| {
                 if payload.event() == PageLoadEvent::Finished {
                     ctx.nav.mark_loaded();
                 }
             }
         });
 
-    // Testmenu pr. vindue. På macOS ligger den i app-menuen (se menu::install_app_menu).
-    #[cfg(not(target_os = "macos"))]
+    if let Some((r, g, b_)) = meta
+        .and_then(|m| m.background_color.as_deref())
+        .and_then(manifest::parse_hex_color)
     {
-        builder = builder.menu(menu::window_menu(app, &label, spec.preview.is_some())?);
+        b = b.background_color(Color(r, g, b_, 255));
     }
 
     // Hver app får sin egen storage, cookies, cache og service worker,
     // som overlever genstart. macOS har ingen data-mappe, men en data store-id (macOS 14+).
     #[cfg(not(any(target_os = "macos", target_os = "ios")))]
     {
-        let dir = app.path().app_data_dir()?.join("webdata").join(&spec.id);
-        builder = builder.data_directory(dir);
+        let dir = app
+            .path()
+            .app_data_dir()?
+            .join("webdata")
+            .join(&ctx.entry.id);
+        b = b.data_directory(dir);
     }
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
-        builder = builder.data_store_identifier(store_identifier(&spec.id));
+        b = b.data_store_identifier(store_identifier(&ctx.entry.id));
     }
+    Ok(b)
+}
 
-    // Husket placering, hvis den stadig er på en tilsluttet skærm.
-    let saved = app
-        .state::<Store>()
-        .read(|s| s.windows.get(&spec.id).copied())
-        .filter(|g| on_some_monitor(app, g));
-    builder = match saved {
-        Some(g) => builder.position(g.x, g.y).inner_size(g.width, g.height),
-        None => builder.inner_size(DEFAULT_SIZE.0, DEFAULT_SIZE.1).center(),
-    };
-
-    // Farver fra manifestet: baggrund mens siden indlæses, lyst/mørkt tema til titellinjen.
-    if let Some(meta) = meta {
-        if let Some((r, g, b)) = meta
-            .background_color
-            .as_deref()
-            .and_then(manifest::parse_hex_color)
-        {
-            builder = builder.background_color(Color(r, g, b, 255));
+/// Lægger appens webview over skærmen og fortæller rammen om det nye layout.
+fn relayout(app: &AppHandle, ctx: &WinCtx, win_w: f64, win_h: f64) -> Layout {
+    let (dev, landscape) = ctx.device();
+    let layout = dev.layout(landscape, win_w, win_h);
+    if !MOCKUP {
+        // Appen fylder vinduet (auto_resize); hold viewport-bredden.
+        if let Some(content) = ctx.content(app) {
+            let _ = content.set_zoom(win_w / layout.viewport.0);
         }
-        if let Some(rgb) = meta
-            .theme_color
-            .as_deref()
-            .and_then(manifest::parse_hex_color)
-        {
-            let theme = if manifest::is_dark(rgb) {
-                Theme::Dark
-            } else {
-                Theme::Light
-            };
-            builder = builder.theme(Some(theme));
-        }
+        return layout;
     }
+    if let Some(content) = ctx.content(app) {
+        let _ = content.set_position(LogicalPosition::new(layout.screen.x, layout.screen.y));
+        let _ = content.set_size(LogicalSize::new(layout.screen.w, layout.screen.h));
+        let _ = content.set_zoom(layout.scale);
+    }
+    push_to_frame(app, ctx, "layout", &layout);
+    layout
+}
 
-    let win = builder.build()?;
-    app.state::<Windows>()
-        .0
-        .lock()
-        .unwrap()
-        .insert(label.clone(), ctx.clone());
+/// Når brugeren har sluppet vindueskanten, tilpasses vinduet til rammen,
+/// så der ikke er tom plads rundt om telefonen.
+fn snap_when_idle(app: &AppHandle, ctx: &Arc<WinCtx>) {
+    if !MOCKUP {
+        return;
+    }
+    let gen = ctx.resize_gen.fetch_add(1, Ordering::SeqCst) + 1;
+    let app = app.clone();
+    let ctx = ctx.clone();
+    thread::spawn(move || {
+        thread::sleep(Duration::from_millis(400));
+        if ctx.resize_gen.load(Ordering::SeqCst) != gen {
+            return;
+        }
+        let Some(win) = ctx.window(&app) else { return };
+        if win.is_maximized().unwrap_or(false) {
+            let _ = win.unmaximize();
+        }
+        let Some((w, h)) = logical_inner_size(&win) else {
+            return;
+        };
+        let (dev, landscape) = ctx.device();
+        let layout = dev.layout(landscape, w, h);
+        let (tw, th) = dev.window_size(landscape, layout.scale);
+        if (tw - w).abs() > 1.5 || (th - h).abs() > 1.5 {
+            let _ = win.set_size(LogicalSize::new(tw, th));
+        }
+    });
+}
 
-    let id = spec.id.clone();
-    let handle = win.clone();
-    win.on_window_event(move |event| match event {
-        WindowEvent::CloseRequested { .. } => {
-            if let Some(geom) = current_geom(&handle) {
-                handle
-                    .state::<Store>()
-                    .update(|s| s.windows.insert(id.clone(), geom));
-            }
-        }
-        WindowEvent::Destroyed => {
-            handle
-                .state::<Windows>()
-                .0
-                .lock()
-                .unwrap()
-                .remove(handle.label());
-        }
-        _ => {}
+/// Skifter enhed og/eller retning, men bevarer skalaen.
+fn set_device(app: &AppHandle, ctx: &Arc<WinCtx>, idx: usize, landscape: bool) {
+    let Some(win) = ctx.window(app) else { return };
+    let old_scale = logical_inner_size(&win)
+        .map(|(w, h)| {
+            let (d, l) = ctx.device();
+            d.layout(l, w, h).scale
+        })
+        .unwrap_or(1.0);
+
+    let dev = &DEVICES[idx];
+    let landscape = landscape && dev.can_rotate;
+    *ctx.device.lock().unwrap() = (idx, landscape);
+    app.state::<Store>().update(|s| {
+        s.devices.insert(
+            ctx.entry.id.clone(),
+            DeviceChoice {
+                device: dev.id.to_string(),
+                landscape,
+            },
+        )
     });
 
-    status::spawn_poller(app.clone(), label);
-    Ok(win)
+    // Samme skala, men aldrig større end skærmen.
+    let (sw, sh) = primary_screen(app);
+    let scale = old_scale.min(dev.fit_scale(landscape, sw, sh));
+    let (min, max) = dev.size_limits(landscape);
+    let (w, h) = dev.window_size(landscape, scale);
+    // Først grænserne vide nok, så den nye størrelse er tilladt.
+    let _ = win.set_min_size(Some(LogicalSize::new(min.0.min(w), min.1.min(h))));
+    let _ = win.set_max_size(Some(LogicalSize::new(max.0.max(w), max.1.max(h))));
+    let _ = win.set_size(LogicalSize::new(w, h));
+    let _ = win.set_min_size(Some(LogicalSize::new(min.0, min.1)));
+    let _ = win.set_max_size(Some(LogicalSize::new(max.0, max.1)));
+    relayout(app, ctx, w, h);
 }
 
 /// Skifter mellem production og preview og indlæser den nye adresse.
-fn switch_deployment(win: &WebviewWindow, ctx: &WinCtx, to: Deployment) {
+fn switch_deployment(app: &AppHandle, ctx: &WinCtx, to: Deployment) {
     if to == Deployment::Preview && ctx.entry.preview.is_none() {
         return;
     }
     *ctx.deployment.lock().unwrap() = to;
     // Tillad Vercels login-redirect m.m. igen indtil den nye side er indlæst.
     ctx.nav.reset_loaded();
-    status::reset_title(win, ctx);
-    let _ = win.navigate(ctx.start_url());
+    status::reset(app, ctx);
+    if let Some(content) = ctx.content(app) {
+        let _ = content.navigate(ctx.start_url());
+    }
 }
 
-/// Vinduets placering i logiske pixels – ikke når det er minimeret/maksimeret.
-fn current_geom(win: &WebviewWindow) -> Option<WindowGeom> {
-    if win.is_minimized().ok()? || win.is_maximized().ok()? {
-        return None;
-    }
+/// Sender data til rammen (ui/frame.js: `window.__frame(kind, data)`).
+/// Bruger eval frem for events, så rammen ikke behøver flere rettigheder.
+fn push_to_frame<T: Serialize>(app: &AppHandle, ctx: &WinCtx, kind: &str, data: &T) {
+    let (Some(frame), Ok(json)) = (ctx.frame(app), serde_json::to_string(data)) else {
+        return;
+    };
+    let _ = frame.eval(format!(
+        "window.__frame && window.__frame({}, {json})",
+        serde_json::Value::from(kind)
+    ));
+}
+
+/// Det rammen får at vide, når den starter.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FrameInit {
+    name: String,
+    devices: Vec<FrameDevice>,
+    has_preview: bool,
+    deployment: Deployment,
+    layout: Layout,
+    status: status::Snapshot,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FrameDevice {
+    id: &'static str,
+    name: &'static str,
+    can_rotate: bool,
+}
+
+pub fn frame_init(app: &AppHandle, label: &str) -> Option<FrameInit> {
+    let ctx = app.state::<Windows>().get(label)?;
+    let win = ctx.window(app)?;
+    let (w, h) = logical_inner_size(&win)?;
+    let (dev, landscape) = ctx.device();
+    let status = ctx.status.lock().unwrap().clone();
+    Some(FrameInit {
+        name: ctx.entry.name.clone(),
+        devices: DEVICES
+            .iter()
+            .map(|d| FrameDevice {
+                id: d.id,
+                name: d.name,
+                can_rotate: d.can_rotate,
+            })
+            .collect(),
+        has_preview: ctx.entry.preview.is_some(),
+        deployment: ctx.deployment(),
+        layout: dev.layout(landscape, w, h),
+        status,
+    })
+}
+
+fn logical_inner_size(win: &Window) -> Option<(f64, f64)> {
     let scale = win.scale_factor().ok()?;
-    let pos = win.outer_position().ok()?.to_logical::<f64>(scale);
     let size = win.inner_size().ok()?.to_logical::<f64>(scale);
-    Some(WindowGeom {
+    Some((size.width, size.height))
+}
+
+fn save_geometry(app: &AppHandle, ctx: &WinCtx, win: &Window) {
+    if win.is_minimized().unwrap_or(false) {
+        return;
+    }
+    let (Ok(scale), Ok(pos)) = (win.scale_factor(), win.outer_position()) else {
+        return;
+    };
+    let Some((width, height)) = logical_inner_size(win) else {
+        return;
+    };
+    let pos = pos.to_logical::<f64>(scale);
+    let geom = WindowGeom {
         x: pos.x,
         y: pos.y,
-        width: size.width,
-        height: size.height,
-    })
+        width,
+        height,
+    };
+    app.state::<Store>()
+        .update(|s| s.windows.insert(ctx.entry.id.clone(), geom));
+}
+
+/// Primærskærmens logiske størrelse (1920×1080, hvis den ikke kan aflæses).
+fn primary_screen(app: &AppHandle) -> (f64, f64) {
+    app.primary_monitor()
+        .ok()
+        .flatten()
+        .map(|m| {
+            let size = m.size().to_logical::<f64>(m.scale_factor());
+            (size.width, size.height)
+        })
+        .unwrap_or((1920.0, 1080.0))
 }
 
 fn on_some_monitor(app: &AppHandle, g: &WindowGeom) -> bool {
     let Ok(monitors) = app.available_monitors() else {
         return true;
     };
-    // Titellinjens venstre del skal kunne gribes.
-    let (px, py) = (g.x + 40.0, g.y + 10.0);
+    // Værktøjslinjens venstre del skal kunne gribes.
+    let (px, py) = (g.x + 40.0, g.y + 20.0);
     monitors.iter().any(|m| {
         let scale = m.scale_factor();
         let pos = m.position().to_logical::<f64>(scale);

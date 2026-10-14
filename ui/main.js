@@ -6,6 +6,14 @@ const els = {
   sort: $("sort"),
   refresh: $("refresh"),
   editApps: $("edit-apps"),
+  addApp: $("add-app"),
+  addDialog: $("add-dialog"),
+  addForm: $("add-form"),
+  addUrl: $("add-url"),
+  addName: $("add-name"),
+  addPreview: $("add-preview"),
+  addError: $("add-error"),
+  addSubmit: $("add-submit"),
   error: $("error"),
   offline: $("offline"),
   favSection: $("fav-section"),
@@ -102,7 +110,13 @@ function tile(app) {
   star.setAttribute("aria-pressed", String(app.favorite));
   star.addEventListener("click", () => toggleFavorite(app));
 
-  li.append(btn, star);
+  const remove = document.createElement("button");
+  remove.className = "remove";
+  remove.textContent = "✕";
+  remove.title = `Fjern ${app.name} fra listen`;
+  remove.addEventListener("click", () => removeApp(app));
+
+  li.append(btn, star, remove);
   return li;
 }
 
@@ -196,7 +210,8 @@ async function refreshAll(list = apps) {
     }
   }
   await Promise.all(Array.from({ length: 4 }, worker));
-  els.offline.hidden = !(ok === 0 && offline > 0);
+  // Kun en fuld opdatering, hvor intet lykkedes, betyder sandsynligvis offline.
+  if (list === apps) els.offline.hidden = !(ok === 0 && offline > 0);
   els.refresh.disabled = false;
 }
 
@@ -265,6 +280,50 @@ function openSettings() {
   els.settings.showModal();
 }
 
+// ---------- Tilføj / fjern ----------
+
+function openAddDialog() {
+  els.addForm.reset();
+  els.addError.hidden = true;
+  els.addSubmit.disabled = false;
+  els.addSubmit.textContent = "Tilføj";
+  els.addDialog.showModal();
+  els.addUrl.focus();
+}
+
+async function submitAdd(e) {
+  e.preventDefault();
+  els.addError.hidden = true;
+  els.addSubmit.disabled = true;
+  els.addSubmit.textContent = "Henter app…";
+  try {
+    const id = await invoke("add_app", {
+      url: els.addUrl.value,
+      name: els.addName.value.trim() || null,
+      preview: els.addPreview.value.trim() || null,
+    });
+    els.addDialog.close();
+    await load();
+    const added = apps.find((a) => a.id === id);
+    if (added && !added.meta) refreshAll([added]);
+  } catch (err) {
+    els.addError.textContent = String(err);
+    els.addError.hidden = false;
+    els.addSubmit.disabled = false;
+    els.addSubmit.textContent = "Tilføj";
+  }
+}
+
+async function removeApp(app) {
+  if (!confirm(`Fjern ${app.name} fra listen?\n\nAppens gemte data i launcheren bevares, hvis du tilføjer den igen.`)) return;
+  try {
+    await invoke("remove_app", { id: app.id });
+    await load();
+  } catch (err) {
+    showError(String(err));
+  }
+}
+
 async function editApps() {
   try {
     await invoke("edit_apps_file");
@@ -298,6 +357,11 @@ els.search.addEventListener("keydown", (e) => {
 });
 els.refresh.addEventListener("click", () => refreshAll());
 els.editApps.addEventListener("click", editApps);
+els.addApp.addEventListener("click", openAddDialog);
+els.addForm.addEventListener("submit", submitAdd);
+for (const b of document.querySelectorAll("[data-close]")) {
+  b.addEventListener("click", () => b.closest("dialog").close());
+}
 window.addEventListener("focus", reload);
 els.openSettings.addEventListener("click", openSettings);
 

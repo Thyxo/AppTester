@@ -376,12 +376,6 @@ pub fn parse_hex_color(s: &str) -> Option<(u8, u8, u8)> {
     }
 }
 
-/// Om farven er mørk nok til, at vinduet bør bruge mørkt tema.
-pub fn is_dark(rgb: (u8, u8, u8)) -> bool {
-    let (r, g, b) = (f64::from(rgb.0), f64::from(rgb.1), f64::from(rgb.2));
-    0.299 * r + 0.587 * g + 0.114 * b < 128.0
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -429,7 +423,5 @@ mod tests {
         assert_eq!(parse_hex_color("#fff"), Some((255, 255, 255)));
         assert_eq!(parse_hex_color("#0f172a"), Some((15, 23, 42)));
         assert_eq!(parse_hex_color("rebeccapurple"), None);
-        assert!(is_dark((15, 23, 42)));
-        assert!(!is_dark((248, 250, 252)));
     }
 }

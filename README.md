@@ -37,69 +37,49 @@ Hvert push bygger desuden på Windows, macOS og Linux i GitHub Actions
 
 ## Tilføj en app
 
-Klik **✎ Apps** i launcheren. Så åbnes din `apps.json` i standardeditoren
-(Notesblok, hvis .json ikke har en). Gem filen og skift tilbage til launcheren,
-så er listen opdateret – ingen genstart eller ny build.
+Klik **+ Tilføj app**, indsæt linket (fx `monizzz.vercel.app`) og tryk **Tilføj**.
+Navn og ikon hentes automatisk fra appens manifest. Valgfrit: eget navn og en
+preview-adresse. Fjern en app med **✕** på flisen.
 
-```json
-[
-  { "id": "stopwatchplus", "name": "Stopwatch+", "url": "https://stopwatchplus.vercel.app/" },
-  {
-    "id": "calcplus",
-    "name": "Calc+",
-    "url": "https://calcplus.vercel.app/",
-    "preview": "https://calcplus-git-dev-thyxo.vercel.app/"
-  }
-]
-```
-
-(Calc+ er et eksempel – tjek de rigtige adresser i Vercel.)
-
-- `id`: små bogstaver, tal, `-` og `_`. Appens storage følger id'et – omdøb det ikke,
-  hvis du vil beholde dens data.
-- `preview` (valgfri): en preview-adresse, du kan skifte til i app-vinduet.
-- Fejl i filen (dublet-id, forkert URL, stavefejl i et felt) vises øverst i launcheren
-  med filens placering.
-- Filen ligger i config-mappen (se *Hvor ligger data?*). Første gang oprettes den
-  med indholdet af [`apps.json`](apps.json) her i repoet.
+Listen gemmes i `apps.json` i config-mappen (se *Hvor ligger data?*). Den kan også
+redigeres manuelt under **⚙ → Rediger apps.json manuelt** – også flere lister
+efter hinanden (`[...] [...]`) accepteres og ryddes op ved næste ændring.
 
 ## Launcheren
 
-- **Ikoner og farver** hentes fra appens web manifest (`<link rel="manifest">`,
-  ellers `/manifest.webmanifest` / `/manifest.json`). Mangler det, bruges
-  apple-touch-icon, `<link rel="icon">` eller `/favicon.ico`, og ellers et farvet bogstav.
-  Alt caches lokalt, så griddet ser ens ud offline. **↻ Opdater** henter igen.
-- **Søg**: `/` eller `Ctrl+F` fokuserer søgefeltet, `Enter` åbner første app, `Esc` rydder.
-- **Sortering**: navn eller senest åbnet. **☆** gør en app til favorit (vises øverst).
-- **App-vinduer** husker størrelse og placering pr. app. Baggrundsfarven kommer fra
-  manifestets `background_color`, og lyst/mørkt tema fra `theme_color`.
+- **Ikoner og farver** hentes fra appens web manifest og caches, så griddet ser
+  ens ud offline. **↻** henter igen.
+- **Søg**: `/` eller `Ctrl+F`, `Enter` åbner første app, `Esc` rydder.
+- **Sortering**: navn eller senest åbnet. **☆** gør en app til favorit.
 
-## Testmenuen (i hvert app-vindue)
+## App-vinduet: enheds-mockup
 
-Menuen **Test** (på macOS i app-menulinjen):
+Hver app åbner i en telefonramme (iPhone 15 som standard) uden Windows-ramme:
 
-| Punkt | Hvad det gør |
+- **Forholdet er låst.** Vinduet kan ikke blive større end enhedens 100 %-størrelse.
+  Gør du det mindre (grebet nederst til højre), skaleres hele telefonen ned – appen
+  ser stadig præcis enhedens viewport (fx 393×852), bare zoomet.
+- **Flyt** vinduet ved at trække i værktøjslinjen eller telefonens ramme.
+- Vinduet husker størrelse, placering og valgt enhed pr. app.
+
+**Værktøjslinjen**
+
+| Knap | Hvad det gør |
 |---|---|
-| DevTools (F12) | Åbn/luk udviklerværktøjer |
-| Genindlæs (Ctrl+R) | Almindelig genindlæsning |
-| Hard reload (Ctrl+Shift+R) | Afregistrerer service workers og tømmer Cache Storage, genindlæser fra netværket. localStorage/IndexedDB bevares |
-| Ryd alle data for appen… | Sletter localStorage, IndexedDB, cookies, cache og service worker for netop denne app (med bekræftelse) og starter den forfra. Tager ca. 2 sek. |
-| Viewport | iPhone SE 375×667 · iPhone 15 393×852 · Pixel 8 412×915 · iPad 820×1180 · Desktop 1280×800 · Vend |
-| Deployment | Skift mellem production og `preview` fra apps.json |
-| Åbn i standardbrowser | Åbner appens adresse i din browser |
+| PROD / PREVIEW | Skift mellem production og preview (hvis appen har en preview-adresse) |
+| SW ✓ · Online | Status: service worker styrer siden / netværk (offline – kører fra cache) |
+| ⟳ | Genindlæs |
+| ⚡ | Hard reload: afregistrerer service workers og tømmer Cache Storage |
+| 🗑 | Ryd alle data for appen (med bekræftelse) |
+| `<>` | DevTools for appen |
+| Enhed | iPhone 15 (393×852) · iPhone SE (375×667) · Pixel 8 (412×915) · iPad (820×1180) · Desktop (1280×800) |
+| ⟲ | Vend (portræt/landskab) |
+| ↗ | Åbn i standardbrowser |
 
-Viewport giver siden præcis den valgte størrelse i CSS-pixels (der korrigeres for
-menulinjen). User-agent og touch ændres ikke.
+User-agent og touch ændres ikke – kun viewport-størrelsen.
 
-**Statuslinje** i vinduestitlen, opdateres hvert 1,5 s:
-`Stopwatch+ · production · SW ✓ · online`
-
-| Del | Betydning |
-|---|---|
-| `SW ✓` | Siden styres af en service worker – kan køre offline |
-| `SW registreret` | Registreret, men styrer ikke siden endnu (typisk første besøg) |
-| `ingen SW` | Ingen service worker |
-| `offline – kører fra cache` | Ingen netværk, siden kører fra service workerens cache |
+På **Linux** kan Tauri ikke placere to webviews frit i samme vindue; dér åbnes appen
+i et almindeligt vindue med enhedens viewport, uden ramme og værktøjslinje.
 
 ### Beskyttede previews
 
@@ -107,8 +87,6 @@ Har projektet Vercel Deployment Protection, så lav et token under
 **Vercel → projekt → Settings → Deployment Protection → Protection Bypass for Automation**,
 og indsæt det i launcheren under **⚙**. Tokenet gemmes i OS'ets keychain
 (Windows Credential Manager / macOS Keychain / Secret Service), aldrig i en fil.
-Når du skifter til preview, sendes det som `x-vercel-protection-bypass`, og Vercel
-sætter en cookie for resten af sessionen. Uden token kan du logge ind på Vercel i vinduet.
 
 ## Arkitektur
 
@@ -118,8 +96,9 @@ Launcher-vindue (ui/, vanilla JS)
 Rust-kerne (src-tauri/src)
   apps · manifest · store · appwin
         │ WebviewWindowBuilder
-App-vinduer (ét pr. app)
-  egen data-mappe · Test-menu · status i titel (eval, ingen IPC)
+App-vinduer (ét pr. app, gennemsigtigt, uden systemramme)
+  frame-webview (lokal: telefon + værktøjslinje)
+  content-webview (appen, egen data-mappe, ingen IPC) lagt over skærmen
 ```
 
 | Valg | Løsning |
@@ -127,7 +106,7 @@ App-vinduer (ét pr. app)
 | Storage pr. app | `data_directory` (Windows/Linux), `data_store_identifier` (macOS 14+) |
 | Eksterne links | `on_navigation` / `on_new_window` → standardbrowser |
 | Redirects | Indtil første side er indlæst, følges redirects (fx til eget domæne eller Vercel-login) |
-| Test-UI | Native menulinje "Test" + status i vinduestitel |
+| Mockup | To webviews i ét vindue (Tauri `unstable`); layout beregnes i `appwin/device.rs`, appen zoomes til enhedens viewport |
 | Rettigheder | Kun launcher-vinduet må kalde Rust-kommandoerne; webapps i app-vinduer har ingen IPC-adgang |
 
 ## Filstruktur
@@ -140,7 +119,8 @@ AppTester/
 ├─ ui/                           launcher-frontend (ingen build-step)
 │  ├─ index.html
 │  ├─ styles.css
-│  └─ main.js                    grid, søg, sortering, favoritter
+│  ├─ main.js                    grid, søg, tilføj/fjern, favoritter
+│  └─ frame.{html,css,js}        telefonramme + værktøjslinje i app-vinduet
 └─ src-tauri/
    ├─ Cargo.toml
    ├─ tauri.conf.json
@@ -154,10 +134,10 @@ AppTester/
       ├─ store.rs                favoritter, senest åbnet, vinduesplacering
       ├─ secrets.rs              bypass-tokens i keychain
       └─ appwin/
-         ├─ mod.rs               app-vinduer, data-mappe, link-politik, deployment
-         ├─ menu.rs              Test-menu og handlinger
-         ├─ status.rs            SW-/offline-status i titlen
-         └─ viewport.rs          viewport-presets
+         ├─ mod.rs               mockup-vindue, data-mappe, link-politik, deployment
+         ├─ device.rs            enheder + layout-matematik (skala, ramme, skærm)
+         ├─ actions.rs           værktøjslinjens handlinger
+         └─ status.rs            SW-/offline-status
 ```
 
 ## Hvor ligger data?

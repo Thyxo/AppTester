@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="da">
+<head>
+  <meta charset="utf-8">
+  <title>Ramme</title>
+  <link rel="stylesheet" href="frame.css">
+</head>
+<body>
+  <header id="bar" class="drag">
+    <div class="row">
+      <span id="name" class="name"></span>
+      <button id="dep" class="chip" type="button" title="Skift mellem production og preview"></button>
+      <span id="sw" class="chip"></span>
+      <span id="net" class="chip"></span>
+      <span class="spacer"></span>
+      <button class="win" data-win="minimize" type="button" title="Minimér" aria-label="Minimér"></button>
+      <button class="win close" data-win="close" type="button" title="Luk" aria-label="Luk"></button>
+    </div>
+    <div class="row tools">
+      <button data-action="reload" type="button" title="Genindlæs"></button>
+      <button data-action="hard-reload" type="button" title="Hard reload – ny service worker og tom cache"></button>
+      <button data-action="clear-data" type="button" title="Ryd alle data for appen…"></button>
+      <button data-action="devtools" type="button" title="DevTools"></button>
+      <select id="device" title="Enhed" aria-label="Enhed"></select>
+      <button id="rotate" data-action="rotate" type="button" title="Vend (portræt/landskab)"></button>
+      <button data-action="open-in-browser" type="button" title="Åbn i standardbrowser"></button>
+    </div>
+  </header>
+
+  <div id="phone" class="drag" hidden>
+    <div id="screen"></div>
+    <div id="notch"></div>
+    <div id="home"></div>
+    <div class="btn" id="btn-a"></div>
+    <div class="btn" id="btn-b"></div>
+    <div class="btn" id="btn-c"></div>
+  </div>
+
+  <div id="grip" title="Træk for at ændre størrelse"></div>
+  <script src="frame.js"></script>
+</body>
+</html>

@@ -23,6 +23,14 @@ pub struct State {
     /// Unix-tid i millisekunder.
     pub last_opened: HashMap<String, u64>,
     pub windows: HashMap<String, WindowGeom>,
+    /// Valgt enhed pr. app (fx "iphone-15") og om den er drejet.
+    pub devices: HashMap<String, DeviceChoice>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DeviceChoice {
+    pub device: String,
+    pub landscape: bool,
 }
 
 pub struct Store {

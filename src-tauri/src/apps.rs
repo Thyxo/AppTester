@@ -5,6 +5,7 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 use tauri::Url;
@@ -28,11 +29,16 @@ pub struct AppEntry {
 
 pub struct AppsFile {
     path: PathBuf,
+    /// Serialiserer læs-ret-skriv, så to samtidige tilføjelser ikke overskriver hinanden.
+    write_lock: Mutex<()>,
 }
 
 impl AppsFile {
     pub fn new(path: PathBuf) -> Self {
-        Self { path }
+        Self {
+            path,
+            write_lock: Mutex::new(()),
+        }
     }
 
     pub fn path(&self) -> &Path {
@@ -63,13 +69,176 @@ impl AppsFile {
             .find(|a| a.id == id)
             .ok_or_else(|| format!("Ukendt app: {id} – er den fjernet fra apps.json?"))
     }
+
+    /// Tilføjer en app ud fra en adresse. Id dannes af domænet; navnet er
+    /// `name` (fx fra appens manifest) eller domænet med stort forbogstav.
+    pub fn add(
+        &self,
+        url: &str,
+        name: Option<&str>,
+        preview: Option<&str>,
+    ) -> Result<AppEntry, String> {
+        let url = normalize_url(url)?;
+        let preview = preview
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+            .map(normalize_url)
+            .transpose()?;
+
+        let _guard = self.write_lock.lock().unwrap();
+        let mut apps = self.load_or_empty()?;
+        if let Some(existing) = apps.iter().find(|a| same_address(&a.url, &url)) {
+            return Err(format!("{} er allerede tilføjet", existing.name));
+        }
+        let id = unique_id(&base_id(&url), &apps);
+        let name = name
+            .map(str::trim)
+            .filter(|n| !n.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| default_name(&url));
+        let entry = AppEntry {
+            id,
+            name,
+            url,
+            preview,
+        };
+        apps.push(entry.clone());
+        self.save(&apps)?;
+        Ok(entry)
+    }
+
+    pub fn remove(&self, id: &str) -> Result<(), String> {
+        let _guard = self.write_lock.lock().unwrap();
+        let mut apps = self.load()?;
+        let before = apps.len();
+        apps.retain(|a| a.id != id);
+        if apps.len() == before {
+            return Err(format!("Ukendt app: {id}"));
+        }
+        self.save(&apps)
+    }
+
+    /// Som `load`, men en manglende fil giver en tom liste.
+    fn load_or_empty(&self) -> Result<Vec<AppEntry>, String> {
+        if self.path.exists() {
+            self.load()
+        } else {
+            Ok(Vec::new())
+        }
+    }
+
+    fn save(&self, apps: &[AppEntry]) -> Result<(), String> {
+        let write = || -> std::io::Result<()> {
+            if let Some(dir) = self.path.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
+            let mut json = serde_json::to_string_pretty(apps)?;
+            json.push('\n');
+            let tmp = self.path.with_extension("json.tmp");
+            std::fs::write(&tmp, json)?;
+            std::fs::rename(tmp, &self.path)
+        };
+        write().map_err(|e| format!("Kunne ikke gemme {}: {e}", self.path.display()))
+    }
+}
+
+/// "monizzz.vercel.app" → "https://monizzz.vercel.app/".
+pub fn normalize_url(input: &str) -> Result<Url, String> {
+    let input = input.trim();
+    if input.is_empty() {
+        return Err("Indsæt en adresse".into());
+    }
+    let with_scheme = if input.contains("://") {
+        input.to_string()
+    } else {
+        // Lokale udviklingsservere kører typisk uden TLS.
+        let host = input.split(['/', ':']).next().unwrap_or("");
+        let local = host == "localhost" || host.parse::<std::net::Ipv4Addr>().is_ok();
+        format!("{}://{input}", if local { "http" } else { "https" })
+    };
+    let url =
+        Url::parse(&with_scheme).map_err(|_| format!("\"{input}\" er ikke en gyldig adresse"))?;
+    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+        return Err(format!("\"{input}\" skal være en http(s)-adresse"));
+    }
+    Ok(url)
+}
+
+fn same_address(a: &Url, b: &Url) -> bool {
+    let norm = |u: &Url| {
+        format!(
+            "{}{}",
+            u.origin().ascii_serialization(),
+            u.path().trim_end_matches('/')
+        )
+    };
+    norm(a) == norm(b)
+}
+
+/// Første del af domænet: "monizzz.vercel.app" → "monizzz", "www.calcplus.dk" → "calcplus".
+fn base_id(url: &Url) -> String {
+    let host = url.host_str().unwrap_or("app");
+    let host = host.strip_prefix("www.").unwrap_or(host);
+    let label = match url.host() {
+        Some(url::Host::Domain(_)) if host != "localhost" => host.split('.').next().unwrap_or(host),
+        _ => host,
+    };
+    let id: String = label
+        .to_ascii_lowercase()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let id = id.trim_matches('-').to_string();
+    if id.is_empty() {
+        "app".into()
+    } else {
+        id
+    }
+}
+
+fn unique_id(base: &str, apps: &[AppEntry]) -> String {
+    let taken = |id: &str| apps.iter().any(|a| a.id == id);
+    if !taken(base) {
+        return base.to_string();
+    }
+    (2..)
+        .map(|n| format!("{base}-{n}"))
+        .find(|id| !taken(id))
+        .expect("uendelig række")
+}
+
+fn default_name(url: &Url) -> String {
+    let base = base_id(url);
+    let mut chars = base.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => base,
+    }
 }
 
 fn parse(json: &str) -> Result<Vec<AppEntry>, String> {
     // Notesblok gemmer gerne med BOM.
     let json = json.trim_start_matches('\u{feff}');
-    let apps: Vec<AppEntry> =
-        serde_json::from_str(json).map_err(|e| format!("apps.json kan ikke læses: {e}"))?;
+
+    // Tilgivende: flere lister efter hinanden ("[...] [...]") eller enkelte
+    // objekter accepteres og lægges sammen. Filen gemmes pænt ved næste ændring.
+    let mut apps: Vec<AppEntry> = Vec::new();
+    for value in serde_json::Deserializer::from_str(json).into_iter::<serde_json::Value>() {
+        let value = value.map_err(|e| format!("apps.json kan ikke læses: {e}"))?;
+        let chunk: Vec<AppEntry> = if value.is_array() {
+            serde_json::from_value(value)
+        } else {
+            serde_json::from_value(value).map(|a| vec![a])
+        }
+        .map_err(|e| format!("apps.json kan ikke læses: {e}"))?;
+        apps.extend(chunk);
+    }
 
     let mut seen = HashSet::new();
     for app in &apps {
@@ -158,5 +327,78 @@ mod tests {
 
         let typo = r#"[{"id":"x","name":"X","ulr":"https://x.dk"}]"#;
         assert!(parse(typo).is_err());
+    }
+
+    #[test]
+    fn accepts_several_lists_in_a_row() {
+        // Præcis sådan en fil, som man nemt får ved at indsætte to eksempler.
+        let json = r#"[
+  { "id": "stopwatchplus", "name": "Stopwatch+", "url": "https://stopwatchplus.vercel.app/" }
+]
+
+[
+  { "id": "monizzz", "name": "Monizzz", "url": "https://monizzz.vercel.app/" }
+]"#;
+        let apps = parse(json).unwrap();
+        assert_eq!(apps.len(), 2);
+        assert_eq!(apps[1].id, "monizzz");
+
+        let single = r#"{ "id": "a", "name": "A", "url": "https://a.dk" }"#;
+        assert_eq!(parse(single).unwrap().len(), 1);
+        assert!(parse("[] [").is_err());
+    }
+
+    #[test]
+    fn add_and_remove_from_a_link() {
+        let dir = std::env::temp_dir().join(format!("pwa-launcher-add-{}", std::process::id()));
+        let file = AppsFile::new(dir.join("apps.json"));
+
+        let a = file.add("monizzz.vercel.app", None, None).unwrap();
+        assert_eq!(a.id, "monizzz");
+        assert_eq!(a.name, "Monizzz");
+        assert_eq!(a.url.as_str(), "https://monizzz.vercel.app/");
+
+        // Samme adresse igen afvises; samme første domænedel får nyt id.
+        assert!(file
+            .add("https://monizzz.vercel.app", None, None)
+            .unwrap_err()
+            .contains("allerede"));
+        let b = file
+            .add(
+                "https://monizzz.dk/",
+                Some("Monizzz DK"),
+                Some("monizzz-git-dev.vercel.app"),
+            )
+            .unwrap();
+        assert_eq!(b.id, "monizzz-2");
+        assert_eq!(b.name, "Monizzz DK");
+        assert!(b.preview.is_some());
+
+        assert_eq!(file.load().unwrap().len(), 2);
+        file.remove("monizzz").unwrap();
+        assert_eq!(file.load().unwrap()[0].id, "monizzz-2");
+        assert!(file.remove("findes-ikke").is_err());
+
+        assert!(file.add("   ", None, None).is_err());
+        assert!(file.add("ftp://x.dk", None, None).is_err());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn ids_from_addresses() {
+        let id = |s: &str| base_id(&normalize_url(s).unwrap());
+        assert_eq!(id("https://www.calcplus.dk/app"), "calcplus");
+        assert_eq!(id("penge-trick.vercel.app"), "penge-trick");
+        assert_eq!(id("http://localhost:5173"), "localhost");
+        assert_eq!(id("http://127.0.0.1:8766/"), "127-0-0-1");
+        assert_eq!(
+            normalize_url("localhost:5173").unwrap().as_str(),
+            "http://localhost:5173/"
+        );
+        assert_eq!(normalize_url("192.168.1.20:3000").unwrap().scheme(), "http");
+        assert_eq!(
+            normalize_url("monizzz.vercel.app").unwrap().scheme(),
+            "https"
+        );
     }
 }

@@ -120,6 +120,39 @@ async fn open_app(
     Ok(())
 }
 
+/// Tilføjer en app ud fra et link. Navn og ikon hentes fra appens manifest,
+/// hvis det kan lade sig gøre (ellers bruges domænet).
+#[tauri::command]
+async fn add_app(
+    app: AppHandle,
+    apps: State<'_, AppsFile>,
+    http: State<'_, Http>,
+    url: String,
+    name: Option<String>,
+    preview: Option<String>,
+) -> Result<String, String> {
+    let address = apps::normalize_url(&url)?;
+    let meta = manifest::fetch(&http.0, &address).await.ok();
+    let name = name
+        .filter(|n| !n.trim().is_empty())
+        .or_else(|| meta.as_ref().and_then(|m| m.name.clone()));
+    let entry = apps.add(address.as_str(), name.as_deref(), preview.as_deref())?;
+    if let (Some(meta), Ok(cache)) = (meta, cache_dir(&app)) {
+        let _ = manifest::save_cached(&cache, &entry.id, &meta);
+    }
+    Ok(entry.id)
+}
+
+/// Fjerner appen fra listen (dens gemte data i app-vinduet bevares).
+#[tauri::command]
+fn remove_app(app: AppHandle, apps: State<AppsFile>, id: String) -> Result<(), String> {
+    apps.remove(&id)?;
+    if let Some(win) = app.get_window(&format!("app-{id}")) {
+        let _ = win.close();
+    }
+    Ok(())
+}
+
 /// Åbner apps.json i standardeditoren (Notesblok, hvis .json ikke har en).
 #[tauri::command]
 fn edit_apps_file(app: AppHandle, apps: State<AppsFile>) -> Result<(), String> {
@@ -131,6 +164,18 @@ fn edit_apps_file(app: AppHandle, apps: State<AppsFile>) -> Result<(), String> {
     #[cfg(windows)]
     let opened = opened.or_else(|_| app.opener().open_path(&path, Some("notepad.exe")));
     opened.map_err(|e| format!("Kunne ikke åbne {path}: {e}"))
+}
+
+/// Mockup-rammen henter sit udgangspunkt (enheder, layout, status).
+#[tauri::command]
+fn frame_init(app: AppHandle, label: String) -> Result<appwin::FrameInit, String> {
+    appwin::frame_init(&app, &label).ok_or_else(|| "Vinduet er lukket".into())
+}
+
+/// Knapper i mockup-rammens værktøjslinje.
+#[tauri::command]
+fn frame_action(app: AppHandle, label: String, action: String) -> Result<(), String> {
+    appwin::actions::run(&app, &label, &action)
 }
 
 pub fn run() {
@@ -147,9 +192,6 @@ pub fn run() {
             app.manage(Store::load(config_dir.join("state.json")));
             app.manage(Http(manifest::http_client()));
             app.manage(appwin::Windows::default());
-            app.on_menu_event(appwin::menu::handle);
-            #[cfg(target_os = "macos")]
-            appwin::menu::install_app_menu(app.handle())?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -157,8 +199,12 @@ pub fn run() {
             refresh_meta,
             toggle_favorite,
             set_bypass_token,
+            add_app,
+            remove_app,
             edit_apps_file,
-            open_app
+            open_app,
+            frame_init,
+            frame_action
         ])
         .run(tauri::generate_context!())
         .expect("PWA Launcher kunne ikke starte");

@@ -1,0 +1,17 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "frame",
+  "description": "Mockup-rammen (lokal side) i app-vinduer: værktøjslinje og vindueshåndtering. Selve webappen i vinduet får ingen rettigheder.",
+  "webviews": [
+    "frame-*"
+  ],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-start-resize-dragging",
+    "core:window:allow-minimize",
+    "core:window:allow-close",
+    "allow-frame-init",
+    "allow-frame-action"
+  ]
+}

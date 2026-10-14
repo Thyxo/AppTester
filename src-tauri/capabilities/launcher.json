@@ -11,6 +11,8 @@
     "allow-refresh-meta",
     "allow-toggle-favorite",
     "allow-set-bypass-token",
+    "allow-add-app",
+    "allow-remove-app",
     "allow-edit-apps-file",
     "allow-open-app"
   ]

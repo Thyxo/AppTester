@@ -25,6 +25,8 @@ pub struct State {
     pub windows: HashMap<String, WindowGeom>,
     /// Valgt enhed pr. app (fx "iphone-15") og om den er drejet.
     pub devices: HashMap<String, DeviceChoice>,
+    /// Apps med iOS-statuslinje `black-translucent` (fuld skærm), som sidst målt.
+    pub fullscreen: HashMap<String, bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -9,7 +9,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
-use super::{push_to_frame, Deployment, WinCtx, Windows};
+use super::{push_to_frame, set_fullscreen, Deployment, WinCtx, Windows};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(1500);
 
@@ -22,16 +22,31 @@ const STATUS_JS: &str = r#"(function () {
   if (sw && sw.getRegistration) {
     sw.getRegistration().then(function (r) { s.reg = !!r; }, function () {});
   }
-  return JSON.stringify({ reg: s.reg, ctl: !!(sw && sw.controller), online: navigator.onLine });
+  var sbs = null;
+  if (/^https?:$/.test(location.protocol) && document.readyState !== "loading") {
+    var m = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
+    sbs = m ? String(m.content).trim().toLowerCase() : "";
+  }
+  return JSON.stringify({ reg: s.reg, ctl: !!(sw && sw.controller), online: navigator.onLine, sbs: sbs });
 })()"#;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 struct PageStatus {
     /// En service worker er registreret for siden.
     reg: bool,
     /// Siden styres af en service worker (kan køre offline).
     ctl: bool,
     online: bool,
+    /// `apple-mobile-web-app-status-bar-style` ("" = ingen; `None` = siden er ikke klar).
+    #[serde(default)]
+    sbs: Option<String>,
+}
+
+impl PageStatus {
+    /// iOS lægger appen under statuslinjen (fuld skærm) med `black-translucent`.
+    fn translucent(&self) -> Option<bool> {
+        self.sbs.as_deref().map(|s| s == "black-translucent")
+    }
 }
 
 /// Det, værktøjslinjen viser.
@@ -56,7 +71,7 @@ impl Default for Snapshot {
 }
 
 impl Snapshot {
-    fn from_page(deployment: Deployment, st: PageStatus) -> Self {
+    fn from_page(deployment: Deployment, st: &PageStatus) -> Self {
         Self {
             deployment,
             sw: match (st.ctl, st.reg) {
@@ -132,7 +147,10 @@ pub fn spawn_poller(app: AppHandle, label: String) {
         let handle = app.clone();
         let _ = content.eval_with_callback(STATUS_JS, move |raw| {
             if let Some(st) = parse(&raw) {
-                publish(&handle, &ctx, Snapshot::from_page(ctx.deployment(), st));
+                if let Some(on) = st.translucent() {
+                    set_fullscreen(&handle, &ctx, on);
+                }
+                publish(&handle, &ctx, Snapshot::from_page(ctx.deployment(), &st));
             }
         });
     });
@@ -162,15 +180,20 @@ mod tests {
             reg: true,
             ctl: false,
             online: true,
+            sbs: None,
         };
         assert_eq!(
             parse(r#"{"reg":true,"ctl":false,"online":true}"#),
-            Some(expected)
+            Some(expected.clone())
         );
         assert_eq!(
-            parse(r#""{\"reg\":true,\"ctl\":false,\"online\":true}""#),
+            parse(r#""{\"reg\":true,\"ctl\":false,\"online\":true,\"sbs\":null}""#),
             Some(expected)
         );
+        let st = parse(r#"{"reg":true,"ctl":false,"online":true,"sbs":"black-translucent"}"#);
+        assert_eq!(st.unwrap().translucent(), Some(true));
+        let st = parse(r#"{"reg":true,"ctl":false,"online":true,"sbs":""}"#);
+        assert_eq!(st.unwrap().translucent(), Some(false));
         assert_eq!(parse("null"), None);
         assert_eq!(parse(""), None);
     }
@@ -179,10 +202,11 @@ mod tests {
     fn titles() {
         let snap = Snapshot::from_page(
             Deployment::Preview,
-            PageStatus {
+            &PageStatus {
                 reg: true,
                 ctl: true,
                 online: false,
+                sbs: None,
             },
         );
         assert_eq!(

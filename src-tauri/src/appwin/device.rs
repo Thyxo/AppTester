@@ -9,6 +9,10 @@
 //! runde hjørner, og hjem-indikatoren tegnes oven på den (som på telefonen).
 //! Ellers reserveres plads til indikatoren, så appens firkantede hjørner holdes
 //! væk fra skærmens runde hjørner.
+//!
+//! `fullscreen` efterligner en iOS-PWA med `black-translucent` statuslinje: appen
+//! fylder hele skærmen, og statuslinjen ligger oven på den. Appen får skærmens
+//! sikre afstande (`safe_area`) som `env(safe-area-inset-*)`.
 
 use serde::Serialize;
 
@@ -91,6 +95,8 @@ pub struct Device {
     /// tegnes den oven på appen i stedet for at tage plads fra den.
     pub home_indicator: Option<(f64, f64, f64)>,
     pub can_rotate: bool,
+    /// iOS/iPadOS: kan køre i fuld skærm under statuslinjen (`fullscreen`).
+    pub ios: bool,
 }
 
 pub const DEVICES: &[Device] = &[
@@ -110,6 +116,7 @@ pub const DEVICES: &[Device] = &[
         portrait: Insets::new(59.0, 0.0, 34.0, 0.0),
         landscape: Insets::new(0.0, 59.0, 21.0, 59.0),
         home_indicator: Some((134.0, 5.0, 8.0)),
+        ios: true,
         can_rotate: true,
     },
     Device {
@@ -128,6 +135,7 @@ pub const DEVICES: &[Device] = &[
         portrait: Insets::new(59.0, 0.0, 34.0, 0.0),
         landscape: Insets::new(0.0, 59.0, 21.0, 59.0),
         home_indicator: Some((134.0, 5.0, 8.0)),
+        ios: true,
         can_rotate: true,
     },
     Device {
@@ -146,6 +154,7 @@ pub const DEVICES: &[Device] = &[
         portrait: Insets::new(20.0, 0.0, 0.0, 0.0),
         landscape: Insets::new(0.0, 0.0, 0.0, 0.0),
         home_indicator: None,
+        ios: true,
         can_rotate: true,
     },
     Device {
@@ -164,6 +173,7 @@ pub const DEVICES: &[Device] = &[
         portrait: Insets::new(24.0, 0.0, 24.0, 0.0),
         landscape: Insets::new(24.0, 0.0, 24.0, 24.0),
         home_indicator: None,
+        ios: false,
         can_rotate: true,
     },
     Device {
@@ -181,7 +191,8 @@ pub const DEVICES: &[Device] = &[
         notch: Notch::Camera,
         portrait: Insets::new(24.0, 0.0, 20.0, 0.0),
         landscape: Insets::new(24.0, 0.0, 20.0, 0.0),
-        home_indicator: None,
+        home_indicator: Some((320.0, 5.0, 7.0)),
+        ios: true,
         can_rotate: true,
     },
     Device {
@@ -200,6 +211,7 @@ pub const DEVICES: &[Device] = &[
         portrait: Insets::new(0.0, 0.0, 0.0, 0.0),
         landscape: Insets::new(0.0, 0.0, 0.0, 0.0),
         home_indicator: None,
+        ios: false,
         can_rotate: false,
     },
 ];
@@ -216,6 +228,15 @@ pub struct Rect {
     pub h: f64,
 }
 
+/// Hvordan appen vises på skærmen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Mode {
+    /// Appens webview kan klippes (runde hjørner, huller til ø og indikator).
+    pub overlay: bool,
+    /// iOS `black-translucent`: appen fylder hele skærmen under statuslinjen.
+    pub fullscreen: bool,
+}
+
 /// Alt hvad frame-siden og appens webview skal placeres efter (vindueskoordinater).
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -224,6 +245,8 @@ pub struct Layout {
     pub kind: Kind,
     pub landscape: bool,
     pub scale: f64,
+    /// Appen fylder hele skærmen, og statuslinjen tegnes i appen.
+    pub fullscreen: bool,
     /// Hele enheden (yderkant).
     pub phone: Rect,
     /// Hele skærmen.
@@ -232,12 +255,17 @@ pub struct Layout {
     pub content: Rect,
     /// Skalerede afstande fra skærmkant til appens område.
     pub insets: Insets,
+    /// Det appen får som `env(safe-area-inset-*)` (CSS-px, uskaleret).
+    pub safe_area: Insets,
     pub radius: f64,
     pub screen_radius: f64,
-    /// Radius på appens nederste hjørner (klippes på Windows), 0 = firkantet.
+    /// Radius på appens øverste/nederste hjørner (klippes på Windows), 0 = firkantet.
+    pub content_radius_top: f64,
     pub content_radius: f64,
     /// Hjem-indikatoren oven på appen (kun med `overlay`).
     pub indicator: Option<Rect>,
+    /// Dynamic Island. I fuld skærm skæres den ud af appen.
+    pub island: Option<Rect>,
     pub rim: f64,
     pub notch: Notch,
     /// Viewport i CSS-pixels, som appen ser.
@@ -273,21 +301,47 @@ impl Device {
         }
     }
 
-    pub fn insets(&self, landscape: bool, overlay: bool) -> Insets {
-        let mut i = if landscape {
+    /// Skærmens sikre afstande (statuslinje, ø, hjem-indikator).
+    fn safe_insets(&self, landscape: bool) -> Insets {
+        if landscape {
             self.landscape
         } else {
             self.portrait
-        };
-        if overlay && self.home_indicator.is_some() {
+        }
+    }
+
+    /// Fuld skærm virker kun på iOS-enheder, og kun når appen kan klippes.
+    pub fn fullscreen(&self, mode: Mode) -> bool {
+        mode.overlay && mode.fullscreen && self.ios
+    }
+
+    /// Den del af skærmen, appen ikke får (tegnes af rammen).
+    pub fn insets(&self, landscape: bool, mode: Mode) -> Insets {
+        if self.fullscreen(mode) {
+            return Insets::new(0.0, 0.0, 0.0, 0.0);
+        }
+        let mut i = self.safe_insets(landscape);
+        if mode.overlay && self.home_indicator.is_some() {
             i.bottom = 0.0;
         }
         i
     }
 
-    pub fn viewport(&self, landscape: bool, overlay: bool) -> (f64, f64) {
+    /// `env(safe-area-inset-*)`: de sikre afstande, der ligger inden for appens område.
+    pub fn safe_area(&self, landscape: bool, mode: Mode) -> Insets {
+        let full = self.safe_insets(landscape);
+        let used = self.insets(landscape, mode);
+        Insets::new(
+            full.top - used.top,
+            full.right - used.right,
+            full.bottom - used.bottom,
+            full.left - used.left,
+        )
+    }
+
+    pub fn viewport(&self, landscape: bool, mode: Mode) -> (f64, f64) {
         let (w, h) = self.screen_size(landscape);
-        let i = self.insets(landscape, overlay);
+        let i = self.insets(landscape, mode);
         (w - i.left - i.right, h - i.top - i.bottom)
     }
 
@@ -316,8 +370,8 @@ impl Device {
     }
 
     /// Placering af enhed, skærm og app i et vindue af størrelsen `win_w` × `win_h`.
-    /// `overlay`: appens webview kan klippes, så hjem-indikatoren ligger ovenpå.
-    pub fn layout(&self, landscape: bool, win_w: f64, win_h: f64, overlay: bool) -> Layout {
+    pub fn layout(&self, landscape: bool, win_w: f64, win_h: f64, mode: Mode) -> Layout {
+        let overlay = mode.overlay;
         let (fw, fh) = self.frame_size(landscape);
         let avail_w = (win_w - 2.0 * PAD).max(1.0);
         let avail_h = (win_h - TOOLBAR - PAD).max(1.0);
@@ -337,8 +391,8 @@ impl Device {
             w: (sw * scale).round(),
             h: (sh * scale).round(),
         };
-        let insets = self.insets(landscape, overlay);
-        let (vw, vh) = self.viewport(landscape, overlay);
+        let insets = self.insets(landscape, mode);
+        let (vw, vh) = self.viewport(landscape, mode);
         let content = Rect {
             x: (screen.x + insets.left * scale).round(),
             y: (screen.y + insets.top * scale).round(),
@@ -347,12 +401,33 @@ impl Device {
         };
         // Går appen helt ud i et af skærmens runde hjørner, skal den rundes.
         let r = self.screen_radius;
-        let reaches_corner = insets.bottom < r && (insets.left < r || insets.right < r);
-        let content_radius = if overlay && reaches_corner {
-            r * scale
-        } else {
-            0.0
+        let sides = insets.left < r || insets.right < r;
+        let corner = |edge: f64| {
+            if overlay && edge < r && sides {
+                r * scale
+            } else {
+                0.0
+            }
         };
+        let (content_radius_top, content_radius) = (corner(insets.top), corner(insets.bottom));
+        let island = (self.notch == Notch::Island).then(|| {
+            let (iw, ih, gap) = (125.0 * scale, 37.0 * scale, 11.0 * scale);
+            if landscape {
+                Rect {
+                    x: (screen.x + gap).round(),
+                    y: (screen.y + (screen.h - iw) / 2.0).round(),
+                    w: ih.round(),
+                    h: iw.round(),
+                }
+            } else {
+                Rect {
+                    x: (screen.x + (screen.w - iw) / 2.0).round(),
+                    y: (screen.y + gap).round(),
+                    w: iw.round(),
+                    h: ih.round(),
+                }
+            }
+        });
         let indicator = match (overlay, self.home_indicator) {
             (true, Some((iw, ih, gap))) => Some(Rect {
                 x: (screen.x + (screen.w - iw * scale) / 2.0).round(),
@@ -367,14 +442,18 @@ impl Device {
             kind: self.kind,
             landscape,
             scale,
+            fullscreen: self.fullscreen(mode),
             phone,
             screen,
             content,
             insets: insets.scaled(scale),
+            safe_area: self.safe_area(landscape, mode),
             radius: self.radius * scale,
             screen_radius: self.screen_radius * scale,
+            content_radius_top,
             content_radius,
             indicator,
+            island,
             rim: self.rim * scale,
             notch: self.notch,
             viewport: (vw, vh),
@@ -385,6 +464,19 @@ impl Device {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const PLAIN: Mode = Mode {
+        overlay: false,
+        fullscreen: false,
+    };
+    const OVERLAY: Mode = Mode {
+        overlay: true,
+        fullscreen: false,
+    };
+    const FULL: Mode = Mode {
+        overlay: true,
+        fullscreen: true,
+    };
 
     fn iphone() -> &'static Device {
         &DEVICES[index_of("iphone-15-pro")]
@@ -401,7 +493,7 @@ mod tests {
     fn full_size_window_gives_scale_one() {
         let d = iphone();
         let (w, h) = d.window_size(false, 1.0);
-        let l = d.layout(false, w, h, false);
+        let l = d.layout(false, w, h, PLAIN);
         assert!((l.scale - 1.0).abs() < 1e-9);
         assert_eq!((l.screen.w, l.screen.h), (393.0, 852.0));
         // Uden statuslinje (59) og hjem-indikator (34).
@@ -418,7 +510,7 @@ mod tests {
     fn overlay_reaches_bottom_with_rounded_corners() {
         let d = iphone();
         let (w, h) = d.window_size(false, 1.0);
-        let l = d.layout(false, w, h, true);
+        let l = d.layout(false, w, h, OVERLAY);
         assert_eq!(l.viewport, (393.0, 793.0));
         assert_eq!(l.content.y + l.content.h, l.screen.y + l.screen.h);
         assert_eq!(l.content_radius, 47.0);
@@ -429,7 +521,7 @@ mod tests {
 
         // Landskab: appen starter efter øen (59 > 47), så ingen afrunding.
         let (w, h) = d.window_size(true, 1.0);
-        let l = d.layout(true, w, h, true);
+        let l = d.layout(true, w, h, OVERLAY);
         assert_eq!(l.viewport, (734.0, 393.0));
         assert_eq!(l.content_radius, 0.0);
         assert!(l.indicator.is_some());
@@ -437,14 +529,65 @@ mod tests {
         // Enheder uden iPhone-indikator er uændrede.
         let se = &DEVICES[index_of("iphone-se")];
         let (w, h) = se.window_size(false, 1.0);
-        assert_eq!(se.layout(false, w, h, true).viewport, (375.0, 647.0));
+        assert_eq!(se.layout(false, w, h, OVERLAY).viewport, (375.0, 647.0));
+    }
+
+    /// iOS black-translucent: appen fylder hele skærmen, får de sikre afstande som
+    /// safe-area, og øen skæres ud.
+    #[test]
+    fn fullscreen_covers_screen_with_safe_area() {
+        let d = iphone();
+        let (w, h) = d.window_size(false, 1.0);
+        let l = d.layout(false, w, h, FULL);
+        assert!(l.fullscreen);
+        assert_eq!(l.viewport, (393.0, 852.0));
+        assert_eq!(l.content, l.screen);
+        assert_eq!(l.safe_area, Insets::new(59.0, 0.0, 34.0, 0.0));
+        assert_eq!((l.content_radius_top, l.content_radius), (47.0, 47.0));
+        let island = l.island.expect("ø");
+        assert!(inside(island, l.content));
+        assert_eq!((island.w, island.h), (125.0, 37.0));
+
+        let (w, h) = d.window_size(true, 1.0);
+        let l = d.layout(true, w, h, FULL);
+        assert_eq!(l.viewport, (852.0, 393.0));
+        assert_eq!(l.safe_area, Insets::new(0.0, 59.0, 21.0, 59.0));
+
+        // Uden fuld skærm får appen kun den nederste afstand (indikatoren ligger ovenpå).
+        let (w, h) = d.window_size(false, 1.0);
+        assert_eq!(
+            d.layout(false, w, h, OVERLAY).safe_area,
+            Insets::new(0.0, 0.0, 34.0, 0.0)
+        );
+        assert_eq!(
+            d.layout(false, w, h, PLAIN).safe_area,
+            Insets::new(0.0, 0.0, 0.0, 0.0)
+        );
+
+        // Kun iOS, og kun hvis appen kan klippes.
+        let pixel = &DEVICES[index_of("pixel-8")];
+        let (w, h) = pixel.window_size(false, 1.0);
+        assert!(!pixel.layout(false, w, h, FULL).fullscreen);
+        let no_clip = Mode {
+            overlay: false,
+            fullscreen: true,
+        };
+        assert!(!d.layout(false, w, h, no_clip).fullscreen);
+
+        // iPhone SE: statuslinjen (20) bliver safe-area.
+        let se = &DEVICES[index_of("iphone-se")];
+        let (w, h) = se.window_size(false, 1.0);
+        let l = se.layout(false, w, h, FULL);
+        assert_eq!(l.viewport, (375.0, 667.0));
+        assert_eq!(l.safe_area.top, 20.0);
+        assert_eq!(l.content_radius, 0.0);
     }
 
     #[test]
     fn half_size_keeps_viewport_and_ratio() {
         let d = iphone();
         let (w, h) = d.window_size(false, 0.5);
-        let l = d.layout(false, w, h, false);
+        let l = d.layout(false, w, h, PLAIN);
         assert!((l.scale - 0.5).abs() < 0.01);
         // Appen ser stadig samme viewport – den er bare zoomet ned.
         assert!((l.content.w / l.scale - 393.0).abs() < 2.0);
@@ -455,7 +598,7 @@ mod tests {
     fn too_wide_window_is_letterboxed_not_stretched() {
         let d = iphone();
         let (_, h) = d.window_size(false, 0.6);
-        let l = d.layout(false, 2000.0, h, false);
+        let l = d.layout(false, 2000.0, h, PLAIN);
         assert!((l.scale - 0.6).abs() < 0.01);
         let (fw, fh) = d.frame_size(false);
         assert!((l.phone.w / l.phone.h - fw / fh).abs() < 0.01);
@@ -463,7 +606,7 @@ mod tests {
 
     #[test]
     fn never_larger_than_full_size() {
-        let l = iphone().layout(false, 5000.0, 5000.0, true);
+        let l = iphone().layout(false, 5000.0, 5000.0, OVERLAY);
         assert_eq!(l.scale, 1.0);
     }
 
@@ -471,7 +614,7 @@ mod tests {
     fn landscape_uses_landscape_insets() {
         let d = iphone();
         let (w, h) = d.window_size(true, 1.0);
-        let l = d.layout(true, w, h, false);
+        let l = d.layout(true, w, h, PLAIN);
         assert_eq!((l.screen.w, l.screen.h), (852.0, 393.0));
         assert_eq!(l.viewport, (852.0 - 118.0, 393.0 - 21.0));
         assert!(inside(l.content, l.screen));
@@ -484,7 +627,7 @@ mod tests {
         for d in DEVICES {
             for landscape in [false, true] {
                 let (sw, sh) = d.screen_size(landscape);
-                let i = d.insets(landscape, false);
+                let i = d.insets(landscape, PLAIN);
                 let r = d.screen_radius;
                 // Hjørnerne af indholdsområdet, målt fra skærmens hjørner.
                 for (dx, dy) in [

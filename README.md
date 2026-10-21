@@ -69,19 +69,34 @@ hjem-indikator. Statuslinjen og bunden farves med appens `theme_color` og
 
 | Enhed | Skærm | Appens viewport (portræt) |
 |---|---|---|
-| iPhone 15 Pro | 393×852 | 393×793 på Windows (minus statuslinje 59) · 393×759 på macOS |
-| iPhone 15 Pro Max | 430×932 | 430×873 på Windows · 430×839 på macOS |
-| iPhone SE | 375×667 | 375×647 (minus statuslinje 20) |
+| iPhone 15 Pro | 393×852 | 393×852 i fuld skærm · ellers 393×793 (Windows) / 393×759 (macOS) |
+| iPhone 15 Pro Max | 430×932 | 430×932 i fuld skærm · ellers 430×873 / 430×839 |
+| iPhone SE | 375×667 | 375×667 i fuld skærm · ellers 375×647 |
 | Pixel 8 | 412×915 | 412×867 (minus statuslinje og navigationslinje 24+24) |
-| iPad Air | 820×1180 | 820×1136 |
+| iPad Air | 820×1180 | 820×1180 i fuld skærm · ellers 820×1156 |
 | Desktop | 1280×800 | 1280×800 |
 
-Viewporten svarer til en installeret PWA (standalone): appen starter under
-statuslinjen og går helt til bund. På Windows klippes appens webview med en
-vinduesregion (runde hjørner + hul til hjem-indikatoren), så indikatoren ligger
-oven på appen som på telefonen. På macOS reserveres plads til indikatoren i stedet.
-Holder du musen over enhedsvælgeren, står den aktuelle viewport. User-agent og
-touch ændres ikke.
+### Som på telefonen
+
+Launcheren får appen til at opføre sig som en installeret PWA på enheden:
+
+| Hvad | Hvordan |
+|---|---|
+| Skrift | iPhonens systemskrift (SF Pro) findes ikke uden for Apple. `-apple-system`, `system-ui`, `SF Pro …` vises med Inter (variabel 100–900, også de tynde vægte). Ikke på macOS, der har SF Pro. |
+| Fuld skærm | Har appen `apple-mobile-web-app-status-bar-style` = `black-translucent`, fylder den hele skærmen, og iOS-statuslinjen (hvid tekst) lægges oven på appen – som på iPhone. Ellers starter appen under statuslinjen. Opdages automatisk og huskes pr. app. |
+| Safe area | `env(safe-area-inset-*)` får enhedens værdier (iPhone 15 Pro: 59 top / 34 bund i fuld skærm, 21 + 59/59 i landskab). |
+| Touch | Musen sender touch-events (swipe, scroll-snap, `pointer: coarse`); rullebjælker skjules. |
+| Identitet | iPhone-/iPad-/Android-user agent, `navigator.standalone`, `matchMedia('(display-mode: standalone)')` og `screen.width/height` som enheden. |
+
+Safe area, touch, rullebjælker og skift af user agent kræver Windows (WebView2's
+DevTools-protokol). Resten virker også på macOS. CSS-reglen `@media (display-mode: standalone)`
+kan ikke efterlignes – kun `matchMedia`. Små forskelle i tegning (Chromium i stedet for Safari)
+kan ikke fjernes; brug en rigtig iPhone til den sidste kontrol.
+
+På Windows klippes appens webview med en vinduesregion (runde hjørner + huller til
+hjem-indikatoren og Dynamic Island), så de ligger oven på appen som på telefonen.
+På macOS reserveres plads til statuslinje og indikator i stedet.
+Holder du musen over enhedsvælgeren, står den aktuelle viewport.
 
 **Værktøjslinjen**
 
@@ -147,6 +162,7 @@ AppTester/
    ├─ tauri.conf.json
    ├─ capabilities/launcher.json rettigheder kun for launcher-vinduet
    ├─ icons/
+   ├─ assets/                    Inter-skrift til apps i mockuppen (SIL Open Font License)
    └─ src/
       ├─ main.rs
       ├─ lib.rs                  opstart, kommandoer
@@ -157,7 +173,8 @@ AppTester/
       └─ appwin/
          ├─ mod.rs               mockup-vindue, data-mappe, link-politik, deployment
          ├─ device.rs            enheder + layout-matematik (skala, ramme, skærm)
-         ├─ clip.rs              Windows: runde hjørner + hul til hjem-indikatoren
+         ├─ clip.rs              Windows: runde hjørner + huller til indikator og ø
+         ├─ emulate.{rs,js}      skrift, safe area, touch, user agent, iOS-statuslinje
          ├─ actions.rs           værktøjslinjens handlinger
          └─ status.rs            SW-/offline-status
 ```

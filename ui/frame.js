@@ -69,7 +69,8 @@ function statusIcons(size) {
 
 function updateClock() {
   const now = new Date();
-  $("clock").textContent = `${now.getHours()}:${String(now.getMinutes()).padStart(2, "0")}`;
+  const sep = /^(da|nb|fi)/i.test(navigator.language || "") ? "." : ":";
+  $("clock").textContent = `${now.getHours()}${sep}${String(now.getMinutes()).padStart(2, "0")}`;
 }
 
 // ---------- Kabinet ----------
@@ -207,11 +208,10 @@ function renderOverlay(l) {
   const island = $("island");
   island.className = "";
   island.style.display = "none";
-  if (l.notch === "island") {
+  if (l.island) {
+    // I fuld skærm har appen et hul her, så øen ses oven på appen.
     island.style.display = "block";
-    const [iw, ih, gap] = [125 * s, 37 * s, 11 * s];
-    if (l.landscape) place(island, scr.x + gap, scr.y + scr.h / 2 - iw / 2, ih, iw);
-    else place(island, scr.x + scr.w / 2 - iw / 2, scr.y + gap, iw, ih);
+    place(island, l.island.x, l.island.y, l.island.w, l.island.h);
   } else if (l.notch === "punch") {
     island.style.display = "block";
     island.className = "punch";

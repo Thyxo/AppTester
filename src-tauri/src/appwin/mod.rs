@@ -8,6 +8,7 @@
 pub mod actions;
 mod clip;
 pub mod device;
+mod emulate;
 mod status;
 
 use std::collections::{HashMap, HashSet};
@@ -28,7 +29,7 @@ use crate::apps::AppEntry;
 use crate::manifest::{self, Meta};
 use crate::secrets;
 use crate::store::{DeviceChoice, Store, WindowGeom};
-use device::{Layout, DEVICES};
+use device::{Layout, Mode, DEVICES};
 
 /// Mockup med ramme og værktøjslinje kræver frit placerbare børne-webviews.
 /// Det understøtter Tauri på Windows og macOS; på Linux stables de i en GTK-box,
@@ -49,6 +50,8 @@ pub struct WinCtx {
     deployment: Mutex<Deployment>,
     /// (indeks i DEVICES, landskab)
     device: Mutex<(usize, bool)>,
+    /// Appen bruger iOS-statuslinjen `black-translucent` og fylder hele skærmen.
+    fullscreen: AtomicBool,
     /// Seneste status fra siden (til værktøjslinjen og vinduestitlen).
     status: Mutex<status::Snapshot>,
     /// Tæller til at finde ud af, hvornår brugeren er færdig med at trække i vinduet.
@@ -95,6 +98,24 @@ impl WinCtx {
     fn device(&self) -> (&'static device::Device, bool) {
         let (i, landscape) = *self.device.lock().unwrap();
         (&DEVICES[i], landscape)
+    }
+
+    fn mode(&self) -> Mode {
+        Mode {
+            overlay: clip::SUPPORTED,
+            fullscreen: self.fullscreen.load(Ordering::SeqCst),
+        }
+    }
+
+    fn layout(&self, win_w: f64, win_h: f64) -> Layout {
+        let (dev, landscape) = self.device();
+        dev.layout(landscape, win_w, win_h, self.mode())
+    }
+
+    /// Det, appens side skal vide om enheden lige nu.
+    fn page_config(&self) -> emulate::PageConfig {
+        let (dev, landscape) = self.device();
+        emulate::PageConfig::new(dev, landscape, dev.fullscreen(self.mode()))
     }
 
     /// Start-URL for den valgte deployment. Previews får Vercels bypass-token på,
@@ -176,6 +197,9 @@ pub fn open(app: &AppHandle, spec: &AppEntry, meta: Option<&Meta>) -> tauri::Res
         nav: NavPolicy::new(&allowed),
         deployment: Mutex::new(Deployment::Production),
         device: Mutex::new((dev_idx, landscape)),
+        fullscreen: AtomicBool::new(
+            store.read(|s| s.fullscreen.get(&spec.id).copied().unwrap_or(false)),
+        ),
         status: Mutex::new(status::Snapshot::default()),
         resize_gen: AtomicU64::new(0),
         window_label: label.clone(),
@@ -225,7 +249,7 @@ pub fn open(app: &AppHandle, spec: &AppEntry, meta: Option<&Meta>) -> tauri::Res
     };
     let window = wb.build()?;
 
-    let layout = dev.layout(landscape, win_w, win_h, clip::SUPPORTED);
+    let layout = ctx.layout(win_w, win_h);
 
     // Rammen først (nederst) – appen lægges ovenpå.
     let frame_url = WebviewUrl::App(format!("frame.html?label={label}").into());
@@ -250,6 +274,7 @@ pub fn open(app: &AppHandle, spec: &AppEntry, meta: Option<&Meta>) -> tauri::Res
         LogicalSize::new(layout.content.w, layout.content.h),
     )?;
     let _ = content.set_zoom(layout.scale);
+    start_content(&content, &ctx, dev, &layout);
 
     attach_events(app, &ctx, &window);
     // Sikr at rammen får layoutet, også hvis den nåede at starte før appen.
@@ -267,7 +292,7 @@ fn open_plain(
 ) -> tauri::Result<()> {
     let (sw, sh) = primary_screen(app);
     let scale = dev.fit_scale(landscape, sw, sh);
-    let (vw, vh) = dev.viewport(landscape, false);
+    let (vw, vh) = dev.viewport(landscape, Mode::default());
     let (w, h) = (vw * scale, vh * scale);
     let window = WindowBuilder::new(app, &ctx.window_label)
         .title(&ctx.entry.name)
@@ -280,8 +305,19 @@ fn open_plain(
         LogicalSize::new(w, h),
     )?;
     let _ = content.set_zoom(scale);
+    let layout = dev.layout(landscape, w, h, Mode::default());
+    start_content(&content, ctx, dev, &layout);
     attach_events(app, ctx, &window);
     Ok(())
+}
+
+/// Windows: webviewet oprettes med about:blank, så enhedens user agent, touch og
+/// safe-area er sat, før appen indlæses. Andre platforme starter direkte på appen.
+fn start_content(content: &Webview, ctx: &WinCtx, dev: &device::Device, layout: &Layout) {
+    emulate::apply(content, dev, layout);
+    if cfg!(windows) {
+        let _ = content.navigate(ctx.start_url());
+    }
 }
 
 fn attach_events(app: &AppHandle, ctx: &Arc<WinCtx>, window: &Window) {
@@ -326,8 +362,15 @@ fn content_builder(
     ctx: &Arc<WinCtx>,
     meta: Option<&Meta>,
 ) -> tauri::Result<WebviewBuilder<tauri::Wry>> {
-    let mut b = WebviewBuilder::new(&ctx.content_label, WebviewUrl::External(ctx.start_url()))
+    let first_url = if cfg!(windows) {
+        Url::parse("about:blank").expect("gyldig adresse")
+    } else {
+        ctx.start_url()
+    };
+    let (dev, _) = ctx.device();
+    let mut b = WebviewBuilder::new(&ctx.content_label, WebviewUrl::External(first_url))
         .zoom_hotkeys_enabled(false)
+        .initialization_script(emulate::init_script(ctx.page_config()))
         .on_navigation({
             let ctx = ctx.clone();
             let app = app.clone();
@@ -357,12 +400,23 @@ fn content_builder(
         })
         .on_page_load({
             let ctx = ctx.clone();
-            move |_webview, payload| {
-                if payload.event() == PageLoadEvent::Finished {
+            move |webview, payload| {
+                // about:blank (start og "ryd data") tæller ikke som appens første side.
+                if payload.event() == PageLoadEvent::Finished
+                    && matches!(payload.url().scheme(), "http" | "https")
+                {
                     ctx.nav.mark_loaded();
+                    let _ = webview.eval(emulate::configure_js(ctx.page_config()));
                 }
             }
         });
+
+    // Uden DevTools-protokollen (macOS/Linux) sættes user agent ved oprettelsen.
+    if !cfg!(windows) {
+        if let Some(ua) = emulate::profile(dev).user_agent {
+            b = b.user_agent(ua);
+        }
+    }
 
     if let Some((r, g, b_)) = meta
         .and_then(|m| m.background_color.as_deref())
@@ -391,8 +445,7 @@ fn content_builder(
 
 /// Lægger appens webview over skærmen og fortæller rammen om det nye layout.
 fn relayout(app: &AppHandle, ctx: &WinCtx, win_w: f64, win_h: f64) -> Layout {
-    let (dev, landscape) = ctx.device();
-    let layout = dev.layout(landscape, win_w, win_h, clip::SUPPORTED);
+    let layout = ctx.layout(win_w, win_h);
     if !MOCKUP {
         // Appen fylder vinduet (auto_resize); hold viewport-bredden.
         if let Some(content) = ctx.content(app) {
@@ -436,7 +489,7 @@ fn snap_when_idle(app: &AppHandle, ctx: &Arc<WinCtx>) {
             return;
         };
         let (dev, landscape) = ctx.device();
-        let layout = dev.layout(landscape, w, h, clip::SUPPORTED);
+        let layout = ctx.layout(w, h);
         let (tw, th) = dev.window_size(landscape, layout.scale);
         if (tw - w).abs() > 1.5 || (th - h).abs() > 1.5 {
             let _ = win.set_size(LogicalSize::new(tw, th));
@@ -448,10 +501,7 @@ fn snap_when_idle(app: &AppHandle, ctx: &Arc<WinCtx>) {
 fn set_device(app: &AppHandle, ctx: &Arc<WinCtx>, idx: usize, landscape: bool) {
     let Some(win) = ctx.window(app) else { return };
     let old_scale = logical_inner_size(&win)
-        .map(|(w, h)| {
-            let (d, l) = ctx.device();
-            d.layout(l, w, h, clip::SUPPORTED).scale
-        })
+        .map(|(w, h)| ctx.layout(w, h).scale)
         .unwrap_or(1.0);
 
     let dev = &DEVICES[idx];
@@ -478,7 +528,33 @@ fn set_device(app: &AppHandle, ctx: &Arc<WinCtx>, idx: usize, landscape: bool) {
     let _ = win.set_size(LogicalSize::new(w, h));
     let _ = win.set_min_size(Some(LogicalSize::new(min.0, min.1)));
     let _ = win.set_max_size(Some(LogicalSize::new(max.0, max.1)));
-    relayout(app, ctx, w, h);
+    let layout = relayout(app, ctx, w, h);
+    emulate_device(app, ctx, &layout);
+}
+
+/// Appen har skiftet statuslinje-stil: fuld skærm til/fra.
+pub(super) fn set_fullscreen(app: &AppHandle, ctx: &WinCtx, on: bool) {
+    if ctx.fullscreen.swap(on, Ordering::SeqCst) == on {
+        return;
+    }
+    app.state::<Store>().update(|s| {
+        s.fullscreen.insert(ctx.entry.id.clone(), on);
+    });
+    let Some((w, h)) = ctx.window(app).and_then(|w| logical_inner_size(&w)) else {
+        return;
+    };
+    let layout = relayout(app, ctx, w, h);
+    emulate_device(app, ctx, &layout);
+}
+
+/// Sender enhedens egenskaber og statuslinjen til appen.
+fn emulate_device(app: &AppHandle, ctx: &WinCtx, layout: &Layout) {
+    let Some(content) = ctx.content(app) else {
+        return;
+    };
+    let (dev, _) = ctx.device();
+    emulate::apply(&content, dev, layout);
+    let _ = content.eval(emulate::configure_js(ctx.page_config()));
 }
 
 /// Skifter mellem production og preview og indlæser den nye adresse.
@@ -532,7 +608,6 @@ pub fn frame_init(app: &AppHandle, label: &str) -> Option<FrameInit> {
     let ctx = app.state::<Windows>().get(label)?;
     let win = ctx.window(app)?;
     let (w, h) = logical_inner_size(&win)?;
-    let (dev, landscape) = ctx.device();
     let status = ctx.status.lock().unwrap().clone();
     Some(FrameInit {
         name: ctx.entry.name.clone(),
@@ -546,7 +621,7 @@ pub fn frame_init(app: &AppHandle, label: &str) -> Option<FrameInit> {
             .collect(),
         has_preview: ctx.entry.preview.is_some(),
         deployment: ctx.deployment(),
-        layout: dev.layout(landscape, w, h, clip::SUPPORTED),
+        layout: ctx.layout(w, h),
         status,
         colors: ctx.colors.clone(),
     })

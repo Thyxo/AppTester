@@ -3053,7 +3053,7 @@ dependencies = [
 
 [[package]]
 name = "pwa-launcher"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "base64 0.22.1",
  "keyring",
@@ -3065,6 +3065,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
  "url",
+ "webview2-com",
  "windows",
 ]
 

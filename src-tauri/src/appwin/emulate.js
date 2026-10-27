@@ -88,10 +88,15 @@
     });
   } catch (e) {}
 
-  // ---------- iOS-statuslinje oven på appen (fuld skærm) ----------
+  // ---------- Skærmens kanter og iOS-statuslinjen, tegnet i appen ----------
+  // Runde hjørner, Dynamic Island og hjem-indikator tegnes her, så browseren
+  // kantudglatter dem (Windows' vinduesregion bag ved giver hakkede kanter).
+  // Alt ligger i en lukket shadow root oven på siden og fanger ingen klik.
   var host = null;
-  var clock = null;
+  var parts = null;
   var timer = 0;
+  /** Rammens farve rundt om skærmen (bezel i frame.css). */
+  var BEZEL = "#050506";
 
   var ICONS =
     '<svg viewBox="0 0 18 12" class="sig"><rect x="0" y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1"/></svg>' +
@@ -100,26 +105,28 @@
 
   // Mål i punkter (= CSS-px i appen).
   var CSS =
-    ":host{all:initial;position:fixed;left:0;right:0;top:0;z-index:2147483647;pointer-events:none;" +
-    "color:#fff;font-family:-apple-system,BlinkMacSystemFont,sans-serif;font-weight:600;" +
-    "-webkit-font-smoothing:antialiased;display:flex;align-items:center}" +
+    ":host{all:initial;position:fixed;inset:0;z-index:2147483647;pointer-events:none;contain:strict}" +
+    ".c,.p,.sb{position:absolute;display:none}" +
+    ".p{border-radius:999px}" +
+    ".sb{left:0;right:0;top:0;align-items:center;color:#fff;font-family:-apple-system,BlinkMacSystemFont,sans-serif;" +
+    "font-weight:600;-webkit-font-smoothing:antialiased}" +
     ".t{font-variant-numeric:tabular-nums;letter-spacing:-.2px}" +
     ".i{display:flex;align-items:center}" +
     "svg{fill:currentColor;display:block}" +
     // iPhone med Dynamic Island: tid og ikoner centreret i hver sin side af øen.
-    ":host(.island){height:59px;font-size:17px}" +
-    ":host(.island) .t,:host(.island) .i{flex:1;justify-content:center;text-align:center;padding-top:1px}" +
-    ":host(.island) .mid{flex:0 0 125px}" +
-    ":host(.island) .sig{height:12px;margin-right:7px}:host(.island) .wifi{height:12px;margin-right:7px}:host(.island) .bat{height:13px}" +
+    ".sb.island{height:59px;font-size:17px}" +
+    ".sb.island .t,.sb.island .i{flex:1;justify-content:center;text-align:center;padding-top:1px}" +
+    ".sb.island .mid{flex:0 0 125px}" +
+    ".sb.island .sig,.sb.island .wifi{height:12px;margin-right:7px}.sb.island .bat{height:13px}" +
     // iPhone SE: tid i midten, ikoner til højre.
-    ":host(.classic){height:20px;font-size:12px;justify-content:center}" +
-    ":host(.classic) .i{position:absolute;right:6px;top:0;height:20px}" +
-    ":host(.classic) .mid{display:none}" +
-    ":host(.classic) .sig{height:8px;margin-right:4px}:host(.classic) .wifi{height:8px;margin-right:4px}:host(.classic) .bat{height:9px}" +
+    ".sb.classic{height:20px;font-size:12px;justify-content:center}" +
+    ".sb.classic .i{position:absolute;right:6px;top:0;height:20px}" +
+    ".sb.classic .mid{display:none}" +
+    ".sb.classic .sig,.sb.classic .wifi{height:8px;margin-right:4px}.sb.classic .bat{height:9px}" +
     // iPad: tid til venstre, ikoner til højre.
-    ":host(.tablet){height:24px;font-size:12.5px;justify-content:space-between;padding:0 20px}" +
-    ":host(.tablet) .mid{display:none}" +
-    ":host(.tablet) .sig{height:9px;margin-right:5px}:host(.tablet) .wifi{height:9px;margin-right:5px}:host(.tablet) .bat{height:10px}";
+    ".sb.tablet{height:24px;font-size:12.5px;justify-content:space-between;padding:0 20px}" +
+    ".sb.tablet .mid{display:none}" +
+    ".sb.tablet .sig,.sb.tablet .wifi{height:9px;margin-right:5px}.sb.tablet .bat{height:10px}";
 
   function time() {
     var d = new Date();
@@ -127,27 +134,86 @@
     return d.getHours() + sep + String(d.getMinutes()).padStart(2, "0");
   }
 
+  function el(root, cls, html) {
+    var e = document.createElement("div");
+    e.className = cls;
+    if (html) e.innerHTML = html;
+    root.appendChild(e);
+    return e;
+  }
+
   function mount() {
     if (host || !document.documentElement) return;
-    host = document.createElement("pwa-launcher-statusbar");
+    host = document.createElement("pwa-launcher-screen");
+    // Inline-style via CSSOM virker også på sider med streng CSP.
+    host.style.cssText = "all:initial;position:fixed;inset:0;z-index:2147483647;pointer-events:none";
     var root = host.attachShadow({ mode: "closed" });
-    root.innerHTML = "<style>" + CSS + '</style><span class="t"></span><span class="mid"></span><span class="i">' + ICONS + "</span>";
-    clock = root.querySelector(".t");
+    try {
+      var sheet = new CSSStyleSheet();
+      sheet.replaceSync(CSS);
+      root.adoptedStyleSheets = [sheet];
+    } catch (e) {
+      el(root, "", "").outerHTML = "<style>" + CSS + "</style>";
+    }
+    parts = {
+      tl: el(root, "c"), tr: el(root, "c"), bl: el(root, "c"), br: el(root, "c"),
+      island: el(root, "p"),
+      indicator: el(root, "p"),
+      bar: el(root, "sb", '<span class="t"></span><span class="mid"></span><span class="i">' + ICONS + "</span>"),
+    };
+    parts.clock = parts.bar.querySelector(".t");
     document.documentElement.appendChild(host);
   }
 
-  function statusBar(style) {
+  function place(e, r) {
+    e.style.display = r ? "block" : "none";
+    if (!r) return;
+    e.style.left = r.x + "px";
+    e.style.top = r.y + "px";
+    e.style.width = r.w + "px";
+    e.style.height = r.h + "px";
+  }
+
+  /** Et hjørne: farvet uden for en kvartcirkel med radius r (glat overgang på 1 px). */
+  function corner(e, r, h, v) {
+    if (!r) return place(e, null);
+    e.style.display = "block";
+    e.style.width = e.style.height = r + "px";
+    e.style.left = h === "l" ? "0" : "";
+    e.style.right = h === "r" ? "0" : "";
+    e.style.top = v === "t" ? "0" : "";
+    e.style.bottom = v === "b" ? "0" : "";
+    var at = (h === "l" ? "100%" : "0") + " " + (v === "t" ? "100%" : "0");
+    e.style.background = "radial-gradient(circle " + r + "px at " + at + ", transparent " + (r - 0.6) + "px, " +
+      BEZEL + " " + (r + 0.4) + "px)";
+  }
+
+  function render() {
     clearInterval(timer);
-    if (!style) {
+    var skin = config.skin;
+    var style = config.statusBar;
+    if (!skin && !style) {
       if (host) host.remove();
-      host = clock = null;
+      host = parts = null;
       return;
     }
     mount();
     if (!host) return;
-    host.className = style;
-    clock.textContent = time();
-    timer = setInterval(function () { clock.textContent = time(); }, 10000);
+    corner(parts.tl, skin && skin.radiusTop, "l", "t");
+    corner(parts.tr, skin && skin.radiusTop, "r", "t");
+    corner(parts.bl, skin && skin.radiusBottom, "l", "b");
+    corner(parts.br, skin && skin.radiusBottom, "r", "b");
+    place(parts.island, skin && skin.island);
+    parts.island.style.background = "#000";
+    place(parts.indicator, skin && skin.indicator);
+    parts.indicator.style.background = (skin && skin.indicatorColor) || "#000";
+
+    parts.bar.className = "sb " + (style || "");
+    parts.bar.style.display = style ? "flex" : "none";
+    if (style) {
+      parts.clock.textContent = time();
+      timer = setInterval(function () { parts && (parts.clock.textContent = time()); }, 10000);
+    }
     // Sider, der erstatter <html>-indholdet, må ikke fjerne den.
     if (!host.isConnected) document.documentElement.appendChild(host);
   }
@@ -156,27 +222,25 @@
   function configure(next) {
     var resized = String(next.screen) !== String(config.screen);
     config = next;
-    statusBar(config.statusBar);
+    render();
     if (resized) {
       try { window.dispatchEvent(new Event("resize")); } catch (e) {}
     }
   }
   window.__pwaLauncher = { configure: configure };
 
-  if (config.statusBar) {
-    if (document.documentElement) statusBar(config.statusBar);
-    else {
-      // Scriptet kan køre, før <html> findes.
-      var mo = new MutationObserver(function () {
-        if (!document.documentElement) return;
-        mo.disconnect();
-        statusBar(config.statusBar);
-      });
-      mo.observe(document, { childList: true });
-    }
+  if (document.documentElement) render();
+  else {
+    // Scriptet kan køre, før <html> findes.
+    var mo = new MutationObserver(function () {
+      if (!document.documentElement) return;
+      mo.disconnect();
+      render();
+    });
+    mo.observe(document, { childList: true });
   }
   // Hold den sidst i dokumentet, hvis siden selv tilføjer elementer til <html>.
   document.addEventListener("DOMContentLoaded", function () {
-    if (host && host.isConnected) document.documentElement.appendChild(host);
+    if (host) document.documentElement.appendChild(host);
   });
 })();

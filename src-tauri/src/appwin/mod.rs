@@ -115,7 +115,7 @@ impl WinCtx {
     /// Det, appens side skal vide om enheden lige nu.
     fn page_config(&self) -> emulate::PageConfig {
         let (dev, landscape) = self.device();
-        emulate::PageConfig::new(dev, landscape, dev.fullscreen(self.mode()))
+        emulate::PageConfig::new(dev, landscape, self.mode(), &self.colors.background)
     }
 
     /// Start-URL for den valgte deployment. Previews får Vercels bypass-token på,

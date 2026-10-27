@@ -9,7 +9,8 @@ use serde::Serialize;
 use serde_json::json;
 use tauri::Webview;
 
-use super::device::{Device, Kind, Layout, Notch};
+use super::device::{Device, Kind, Layout, Mode, Notch, Rect};
+use crate::manifest::parse_hex_color;
 
 const INIT_JS: &str = include_str!("emulate.js");
 
@@ -73,31 +74,82 @@ pub fn statusbar_style(dev: &Device, landscape: bool, fullscreen: bool) -> Optio
 }
 
 /// Det, appens side får at vide (se `configure` i emulate.js).
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PageConfig {
     /// iOS-statuslinjen, som appen selv skal vise (fuld skærm).
     pub status_bar: Option<&'static str>,
     /// `screen.width/height` (enhedens skærm; `None` = den rigtige).
     pub screen: Option<(f64, f64)>,
+    /// Skærmens kanter tegnet i appen (kun når appens webview klippes).
+    pub skin: Option<Skin>,
+}
+
+/// Runde hjørner, Dynamic Island og hjem-indikator, tegnet i appens egen side
+/// (CSS-px). Browseren kantudglatter dem; Windows' vinduesregion kan ikke.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Skin {
+    pub radius_top: f64,
+    pub radius_bottom: f64,
+    pub island: Option<Rect>,
+    pub indicator: Option<Rect>,
+    pub indicator_color: &'static str,
 }
 
 impl PageConfig {
-    pub fn new(dev: &Device, landscape: bool, fullscreen: bool) -> Self {
+    /// `background`: appens baggrundsfarve (bestemmer hjem-indikatorens farve).
+    pub fn new(dev: &Device, landscape: bool, mode: Mode, background: &str) -> Self {
         let size = if landscape {
             (dev.screen_h, dev.screen_w)
         } else {
             (dev.screen_w, dev.screen_h)
         };
-        let screen = (dev.kind != Kind::Desktop).then_some(size);
+        // Layout i fuld størrelse: så er vinduets punkter = appens CSS-px.
+        let (w, h) = dev.window_size(landscape, 1.0);
+        let l = dev.layout(landscape, w, h, mode);
+        let local = |r: Rect| Rect {
+            x: r.x - l.content.x,
+            y: r.y - l.content.y,
+            w: r.w,
+            h: r.h,
+        };
+        let skin = mode.overlay.then(|| Skin {
+            radius_top: if l.content_radius_top > 0.0 {
+                dev.screen_radius
+            } else {
+                0.0
+            },
+            radius_bottom: if l.content_radius > 0.0 {
+                dev.screen_radius
+            } else {
+                0.0
+            },
+            island: l.island.filter(|_| l.fullscreen).map(local),
+            indicator: l.indicator.map(local),
+            indicator_color: contrast_on(background),
+        });
         Self {
-            status_bar: statusbar_style(dev, landscape, fullscreen),
-            screen,
+            status_bar: statusbar_style(dev, landscape, l.fullscreen),
+            screen: (dev.kind != Kind::Desktop).then_some(size),
+            skin,
         }
     }
 
     fn json(&self) -> String {
         serde_json::to_string(self).unwrap_or_else(|_| "{}".into())
+    }
+}
+
+/// Sort eller hvid – det der kan ses på `hex` (som rammens contrastOn).
+fn contrast_on(hex: &str) -> &'static str {
+    match parse_hex_color(hex) {
+        Some((r, g, b))
+            if 0.299 * f64::from(r) + 0.587 * f64::from(g) + 0.114 * f64::from(b) <= 150.0 =>
+        {
+            "#fff"
+        }
+        _ => "#000",
     }
 }
 
@@ -231,17 +283,62 @@ mod tests {
     #[test]
     fn init_script_is_filled_in() {
         let iphone = &DEVICES[index_of("iphone-15-pro")];
-        let js = init_script(PageConfig::new(iphone, false, true));
+        let js = init_script(PageConfig::new(iphone, false, FULL, "#000000"));
         assert!(!js.contains("__FONT__") && !js.contains("__CONFIG__"));
-        assert!(js.contains(r#"var config = {"statusBar":"island","screen":[393.0,852.0]};"#));
+        assert!(
+            js.contains(r#"var config = {"statusBar":"island","screen":[393.0,852.0],"skin":{"#)
+        );
         let desktop = &DEVICES[index_of("desktop")];
         assert_eq!(
-            configure_js(PageConfig::new(desktop, false, false)),
-            r#"window.__pwaLauncher && window.__pwaLauncher.configure({"statusBar":null,"screen":null})"#
+            configure_js(PageConfig::new(desktop, false, PLAIN, "#fff")),
+            r#"window.__pwaLauncher && window.__pwaLauncher.configure({"statusBar":null,"screen":null,"skin":null})"#
         );
         // Landskab: bredde og højde byttes, og iPhone har ingen statuslinje.
-        let l = PageConfig::new(iphone, true, true);
+        let l = PageConfig::new(iphone, true, FULL, "#000");
         assert_eq!((l.status_bar, l.screen), (None, Some((852.0, 393.0))));
+    }
+
+    const PLAIN: Mode = Mode {
+        overlay: false,
+        fullscreen: false,
+    };
+    const FULL: Mode = Mode {
+        overlay: true,
+        fullscreen: true,
+    };
+
+    /// Ø, indikator og hjørner i appens egne CSS-px (iPhone 15 Pro: 393×852).
+    #[test]
+    fn skin_in_page_coordinates() {
+        let iphone = &DEVICES[index_of("iphone-15-pro")];
+        let skin = PageConfig::new(iphone, false, FULL, "#ffffff")
+            .skin
+            .unwrap();
+        assert_eq!((skin.radius_top, skin.radius_bottom), (47.0, 47.0));
+        let island = skin.island.unwrap();
+        assert_eq!(
+            (island.x, island.y, island.w, island.h),
+            (134.0, 11.0, 125.0, 37.0)
+        );
+        let ind = skin.indicator.unwrap();
+        assert_eq!((ind.x, ind.y, ind.w, ind.h), (130.0, 839.0, 134.0, 5.0));
+        assert_eq!(skin.indicator_color, "#000");
+
+        // Uden fuld skærm: kun nederste hjørner og indikatoren (øen ligger over appen).
+        let overlay = Mode {
+            overlay: true,
+            fullscreen: false,
+        };
+        let skin = PageConfig::new(iphone, false, overlay, "#000000")
+            .skin
+            .unwrap();
+        assert_eq!((skin.radius_top, skin.radius_bottom), (0.0, 47.0));
+        assert!(skin.island.is_none());
+        assert_eq!(skin.indicator.unwrap().y, 793.0 - 13.0);
+        assert_eq!(skin.indicator_color, "#fff");
+
+        // Uden klipning (macOS) tegnes intet.
+        assert!(PageConfig::new(iphone, false, PLAIN, "#fff").skin.is_none());
     }
 
     #[test]

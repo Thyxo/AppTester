@@ -1,7 +1,10 @@
-//! Windows: klipper appens webview med en vinduesregion – runde hjørner som
-//! skærmen og pilleformede huller, hvor rammen under tegner hjem-indikatoren
-//! og (i fuld skærm) Dynamic Island. Så kan appen gå helt ud til kanten, som på
-//! telefonen.
+//! Windows: klipper appens webview med en vinduesregion – runde hjørner og
+//! pilleformede huller, hvor rammen under tegner hjem-indikatoren og (i fuld
+//! skærm) Dynamic Island. Så kan appen gå helt ud til kanten, som på telefonen.
+//!
+//! En vinduesregion kantudglattes ikke. De synlige kanter tegnes derfor glat i
+//! appens side (emulate.js), og regionen ligger lidt uden for dem, så dens
+//! trappetrin skjules: hjørnerne med mindre radius, hullerne lidt mindre.
 
 use tauri::Webview;
 
@@ -9,6 +12,13 @@ use super::device::Layout;
 
 /// Om platformen understøtter klipning (bestemmer layoutet i `device.rs`).
 pub const SUPPORTED: bool = cfg!(windows);
+
+/// Regionens hjørneradius i forhold til skærmens.
+#[cfg_attr(not(windows), allow(dead_code))]
+const CORNER_FACTOR: f64 = 0.6;
+/// Så meget mindre (logiske px) hullerne er end øen og indikatoren.
+#[cfg_attr(not(windows), allow(dead_code))]
+const HOLE_INSET: f64 = 1.5;
 
 #[cfg(windows)]
 pub fn apply(content: &Webview, layout: &Layout, scale_factor: f64) {
@@ -21,13 +31,21 @@ pub fn apply(content: &Webview, layout: &Layout, scale_factor: f64) {
     // Regionen er i fysiske pixels relativt til webviewets eget vindue.
     let px = |v: f64| (v * scale_factor).round() as i32;
     let (w, h) = (px(layout.content.w), px(layout.content.h));
-    let (rt, rb) = (px(layout.content_radius_top), px(layout.content_radius));
+    // Hjørnernes trappetrin skal ligge uden for den glatte bue (radius r).
+    let corner = |r: f64| px(r * CORNER_FACTOR);
+    let (rt, rb) = (
+        corner(layout.content_radius_top),
+        corner(layout.content_radius),
+    );
+    // Hullerne skal ligge inden for de glatte piller, appen tegner ovenpå.
+    let inset = px(HOLE_INSET).max(1);
     let pill = |r: &super::device::Rect| {
+        let (w, h) = (px(r.w) - 2 * inset, px(r.h) - 2 * inset);
         (
-            px(r.x - layout.content.x),
-            px(r.y - layout.content.y),
-            px(r.w),
-            px(r.h).max(2),
+            px(r.x - layout.content.x) + inset,
+            px(r.y - layout.content.y) + inset,
+            w.max(2),
+            h.max(2),
         )
     };
     let mut holes: Vec<(i32, i32, i32, i32)> = layout.indicator.iter().map(pill).collect();

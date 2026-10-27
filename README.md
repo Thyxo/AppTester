@@ -95,6 +95,8 @@ kan ikke fjernes; brug en rigtig iPhone til den sidste kontrol.
 
 På Windows klippes appens webview med en vinduesregion (runde hjørner + huller til
 hjem-indikatoren og Dynamic Island), så de ligger oven på appen som på telefonen.
+De synlige kanter tegnes glat (kantudglattet) i appens side; regionen ligger skjult
+lidt uden for dem, fordi Windows ikke kan kantudglatte en vinduesregion.
 På macOS reserveres plads til statuslinje og indikator i stedet.
 Holder du musen over enhedsvælgeren, står den aktuelle viewport.
 
